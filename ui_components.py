@@ -26,6 +26,8 @@ from PyQt5.QtWidgets import (
     QFrame,
     QScrollArea,
     QComboBox,
+    QTabWidget,
+    QGridLayout,
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import QPainter, QPicture
@@ -44,6 +46,31 @@ try:
     import pandas_ta as ta
 except ImportError:
     ta = None
+
+
+class DateAxisItem(pg.AxisItem):
+    """X ekseninde index yerine get_display_candles() 'time' değerlerini gösterir."""
+    def __init__(self, orientation="bottom", time_labels=None, *args, **kwargs):
+        super().__init__(orientation, *args, **kwargs)
+        self._time_labels = time_labels or []
+
+    def set_time_labels(self, labels: List[str]) -> None:
+        self._time_labels = labels
+
+    def tickStrings(self, values, scale, spacing):
+        if not self._time_labels:
+            return super().tickStrings(values, scale, spacing)
+        result = []
+        for v in values:
+            i = int(round(v))
+            if 0 <= i < len(self._time_labels):
+                s = str(self._time_labels[i])
+                if len(s) > 12:
+                    s = s[:10] + ".."
+                result.append(s)
+            else:
+                result.append(str(i))
+        return result
 
 
 class CandlestickItem(pg.GraphicsObject):
@@ -121,11 +148,16 @@ class MainWindow(QMainWindow):
             left_layout.addWidget(b)
         left_layout.addStretch()
 
-        # Sağ: ana içerik
+        # Sağ: sekmeli ana içerik
         right = QWidget()
-        main_layout = QVBoxLayout(right)
+        right_main = QVBoxLayout(right)
+        self.tabs = QTabWidget()
 
-        # ----- Üst: Timeframe + Kontroller + RSI/Hacim + Bakiye -----
+        # ========== SEKME 1: Grafik & İşlem ==========
+        tab1 = QWidget()
+        main_layout = QVBoxLayout(tab1)
+
+        # ----- Üst: Timeframe + Kontroller + İndikatörler + Bakiye -----
         top = QHBoxLayout()
         top.addWidget(QLabel("Zaman:"))
         self._tf_buttons = {}
@@ -153,12 +185,18 @@ class MainWindow(QMainWindow):
         self.label_speed = QLabel("500")
         top.addWidget(self.label_speed)
 
-        self.cb_rsi = QCheckBox("RSI Göster")
         self.cb_volume = QCheckBox("Hacim Göster")
-        self.cb_rsi.toggled.connect(self._toggle_rsi)
+        self.cb_rsi = QCheckBox("RSI")
+        self.cb_macd = QCheckBox("MACD")
+        self.cb_ema = QCheckBox("EMA (20, 50)")
         self.cb_volume.toggled.connect(self._toggle_volume)
-        top.addWidget(self.cb_rsi)
+        self.cb_rsi.toggled.connect(self._toggle_rsi)
+        self.cb_macd.toggled.connect(self._toggle_macd)
+        self.cb_ema.toggled.connect(self._toggle_ema)
         top.addWidget(self.cb_volume)
+        top.addWidget(self.cb_rsi)
+        top.addWidget(self.cb_macd)
+        top.addWidget(self.cb_ema)
 
         top.addStretch()
         self.label_balance = QLabel("USDT: 0.00")
@@ -171,7 +209,8 @@ class MainWindow(QMainWindow):
         chart_layout = QVBoxLayout(chart_container)
         chart_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.plot_candles = pg.PlotWidget(title="BTC OHLC")
+        self._axis_dates = DateAxisItem(orientation="bottom")
+        self.plot_candles = pg.PlotWidget(title="BTC OHLC", axisItems={"bottom": self._axis_dates})
 
         self.buy_markers = pg.ScatterPlotItem(
             size=12,
@@ -194,25 +233,40 @@ class MainWindow(QMainWindow):
         self.plot_candles.showGrid(x=True, y=True, alpha=0.3)
         self.candlestick_item = CandlestickItem([])
         self.plot_candles.addItem(self.candlestick_item)
+        self.ema20_curve = self.plot_candles.plot(pen=pg.mkPen("y", width=1))
+        self.ema50_curve = self.plot_candles.plot(pen=pg.mkPen("w", width=1))
+        self.ema20_curve.setVisible(False)
+        self.ema50_curve.setVisible(False)
         self.price_line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen("y", width=1))
         self.plot_candles.addItem(self.price_line)
         chart_layout.addWidget(self.plot_candles, stretch=3)
 
-        self.plot_volume = pg.PlotWidget(title="Hacim")
+        self._axis_dates_volume = DateAxisItem(orientation="bottom")
+        self.plot_volume = pg.PlotWidget(title="Hacim", axisItems={"bottom": self._axis_dates_volume})
         self.plot_volume.setBackground("k")
         self.plot_volume.showGrid(x=True, y=True, alpha=0.3)
         self.volume_bars = pg.BarGraphItem(x=[], height=[], width=0.8, brush=pg.mkBrush(100, 100, 200, 150))
         self.plot_volume.addItem(self.volume_bars)
-        self.volume_container = chart_layout.addWidget(self.plot_volume, stretch=1)
+        chart_layout.addWidget(self.plot_volume, stretch=1)
         self.plot_volume.hide()
 
-        self.plot_rsi = pg.PlotWidget(title="RSI")
+        self._axis_dates_rsi = DateAxisItem(orientation="bottom")
+        self.plot_rsi = pg.PlotWidget(title="RSI", axisItems={"bottom": self._axis_dates_rsi})
         self.plot_rsi.setBackground("k")
         self.plot_rsi.showGrid(x=True, y=True, alpha=0.3)
         self.plot_rsi.setYRange(0, 100)
         self.rsi_curve = self.plot_rsi.plot(pen=pg.mkPen("m", width=2))
-        self.rsi_container = chart_layout.addWidget(self.plot_rsi, stretch=1)
+        chart_layout.addWidget(self.plot_rsi, stretch=1)
         self.plot_rsi.hide()
+
+        self._axis_dates_macd = DateAxisItem(orientation="bottom")
+        self.plot_macd = pg.PlotWidget(title="MACD", axisItems={"bottom": self._axis_dates_macd})
+        self.plot_macd.setBackground("k")
+        self.plot_macd.showGrid(x=True, y=True, alpha=0.3)
+        self.macd_curve = self.plot_macd.plot(pen=pg.mkPen("c", width=2))
+        self.macd_signal_curve = self.plot_macd.plot(pen=pg.mkPen("y", width=1))
+        chart_layout.addWidget(self.plot_macd, stretch=1)
+        self.plot_macd.hide()
 
         self.plot_equity = pg.PlotWidget(title="Portföy (USDT)")
         self.plot_equity.setBackground("k")
@@ -262,7 +316,27 @@ class MainWindow(QMainWindow):
         flay.addWidget(self.label_position)
         main_layout.addWidget(futures_group)
 
-        # ----- Bot Yöneticisi -----
+        # ----- Oynat / Duraklat / İleri Sar / Hızlı Test -----
+        ctrl_row = QHBoxLayout()
+        self.btn_play = QPushButton("Oynat")
+        self.btn_pause = QPushButton("Duraklat")
+        self.btn_step = QPushButton("İleri Sar (Tek Mum)")
+        self.btn_fast_forward = QPushButton("Hızlı Test (Backtest)")
+        self.btn_play.clicked.connect(self._on_play)
+        self.btn_pause.clicked.connect(self._on_pause)
+        self.btn_step.clicked.connect(self._on_step)
+        self.btn_fast_forward.clicked.connect(self._on_fast_forward)
+        ctrl_row.addWidget(self.btn_play)
+        ctrl_row.addWidget(self.btn_pause)
+        ctrl_row.addWidget(self.btn_step)
+        ctrl_row.addWidget(self.btn_fast_forward)
+        main_layout.addLayout(ctrl_row)
+
+        self.tabs.addTab(tab1, "Grafik & İşlem")
+
+        # ========== SEKME 2: Botlar & İstatistikler ==========
+        tab2 = QWidget()
+        tab2_layout = QVBoxLayout(tab2)
         bot_group = QGroupBox("Bot Yöneticisi")
         bot_layout = QVBoxLayout(bot_group)
         for bot in self._bots:
@@ -273,24 +347,26 @@ class MainWindow(QMainWindow):
         if not self._bots:
             bot_layout.addWidget(QLabel("Tanımlı bot yok."))
         bot_layout.addStretch()
-        main_layout.addWidget(bot_group)
+        tab2_layout.addWidget(bot_group)
+        stats_group = QGroupBox("Gelişmiş İstatistikler (Tüm Zamanlar / Anlık Test)")
+        stats_grid = QGridLayout(stats_group)
+        self.label_win_rate = QLabel("Win Rate: -")
+        self.label_total_pnl = QLabel("Toplam PnL: -")
+        self.label_max_dd = QLabel("Max Drawdown: -")
+        self.label_total_trades = QLabel("Toplam İşlem: -")
+        self.label_commission = QLabel("Toplam Komisyon: -")
+        stats_grid.addWidget(self.label_win_rate, 0, 0)
+        stats_grid.addWidget(self.label_total_pnl, 0, 1)
+        stats_grid.addWidget(self.label_max_dd, 1, 0)
+        stats_grid.addWidget(self.label_total_trades, 1, 1)
+        stats_grid.addWidget(self.label_commission, 2, 0)
+        tab2_layout.addWidget(stats_group)
+        tab2_layout.addStretch()
+        self.tabs.addTab(tab2, "Botlar & İstatistikler")
 
-        # ----- Oynat / Duraklat / İleri Sar -----
-        ctrl_row = QHBoxLayout()
-        self.btn_play = QPushButton("Oynat")
-        self.btn_pause = QPushButton("Duraklat")
-        self.btn_step = QPushButton("İleri Sar (Tek Mum)")
-        self.btn_play.clicked.connect(self._on_play)
-        self.btn_pause.clicked.connect(self._on_pause)
-        self.btn_step.clicked.connect(self._on_step)
-        ctrl_row.addWidget(self.btn_play)
-        ctrl_row.addWidget(self.btn_pause)
-        ctrl_row.addWidget(self.btn_step)
-        main_layout.addLayout(ctrl_row)
-
-        # ----- Log + Export -----
-        log_group = QGroupBox("İşlem Logu")
-        log_layout = QVBoxLayout(log_group)
+        # ========== SEKME 3: İşlem Logu ==========
+        tab3 = QWidget()
+        log_layout = QVBoxLayout(tab3)
         export_row = QHBoxLayout()
         self.btn_export = QPushButton("Logları CSV'ye Aktar")
         self.btn_export.clicked.connect(self._on_export_csv)
@@ -298,13 +374,15 @@ class MainWindow(QMainWindow):
         export_row.addStretch()
         log_layout.addLayout(export_row)
         self.table_log = QTableWidget()
-        self.table_log.setColumnCount(10)
+        self.table_log.setColumnCount(11)
         self.table_log.setHorizontalHeaderLabels([
-            "Tarih", "Yön", "Giriş Fiyat", "Çıkış Fiyat", "Marjin", "PnL", "ROE %", "Kapanış Sebebi", "Tetikleyici", "Bakiye"
+            "Tarih", "Yön", "Giriş Fiyat", "Çıkış Fiyat", "Marjin", "PnL", "ROE %", "Kapanış Sebebi", "Tetikleyici", "Komisyon", "Bakiye"
         ])
         self.table_log.horizontalHeader().setStretchLastSection(True)
         log_layout.addWidget(self.table_log)
-        main_layout.addWidget(log_group)
+        self.tabs.addTab(tab3, "İşlem Logu")
+
+        right_main.addWidget(self.tabs)
 
         # Ana yerleşim: sol toolbar + sağ içerik
         central = QWidget()
@@ -323,8 +401,11 @@ class MainWindow(QMainWindow):
         data_engine.candle_emitted.connect(self._on_candle)
         data_engine.stream_finished.connect(self._on_stream_finished)
         data_engine.timeframe_candle_completed.connect(self._on_timeframe_candle_completed)
+        data_engine.fast_forward_progress.connect(self._on_fast_forward_progress)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self._update_balance_label()
         self._update_position_label()
+        self._update_stats()
         self._on_speed_preset_changed(self.combo_speed.currentText())
 
     def _set_timeframe(self, tf: str) -> None:
@@ -336,6 +417,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_display_candles(self) -> None:
         candles = self.data_engine.get_display_candles()
+        times = [c.get("time", "") for c in candles]
+        self._axis_dates.set_time_labels(times)
+        self._axis_dates_volume.set_time_labels(times)
+        self._axis_dates_rsi.set_time_labels(times)
+        self._axis_dates_macd.set_time_labels(times)
         self.candlestick_item.set_data(candles)
         if candles:
             close = candles[-1]["close"]
@@ -349,17 +435,32 @@ class MainWindow(QMainWindow):
         if self.cb_volume.isChecked():
             self._update_volume(candles)
         if self.cb_rsi.isChecked():
-            self._update_rsi()
+            self._update_rsi_from_candles(candles)
+        if self.cb_macd.isChecked():
+            self._update_macd_from_candles(candles)
+        if self.cb_ema.isChecked():
+            self._update_ema_from_candles(candles)
 
     def _toggle_rsi(self, checked: bool) -> None:
         self.plot_rsi.setVisible(checked)
         if checked:
-            self._update_rsi()
+            self._update_rsi_from_candles(self.data_engine.get_display_candles())
 
     def _toggle_volume(self, checked: bool) -> None:
         self.plot_volume.setVisible(checked)
         if checked:
             self._update_volume(self.data_engine.get_display_candles())
+
+    def _toggle_macd(self, checked: bool) -> None:
+        self.plot_macd.setVisible(checked)
+        if checked:
+            self._update_macd_from_candles(self.data_engine.get_display_candles())
+
+    def _toggle_ema(self, checked: bool) -> None:
+        self.ema20_curve.setVisible(checked)
+        self.ema50_curve.setVisible(checked)
+        if checked:
+            self._update_ema_from_candles(self.data_engine.get_display_candles())
 
     def _update_volume(self, candles: List[Dict[str, Any]]) -> None:
         if not candles:
@@ -370,12 +471,12 @@ class MainWindow(QMainWindow):
         self.volume_bars.setOpts(x=x, height=heights, width=0.8)
         self.plot_volume.setXRange(0, max(1, len(candles) * 1.1))
 
-    def _update_rsi(self) -> None:
-        df = self.data_engine.get_all_1m_for_indicators()
-        if df is None or len(df) < 15 or ta is None:
+    def _update_rsi_from_candles(self, candles: List[Dict[str, Any]]) -> None:
+        if not candles or len(candles) < 15 or ta is None:
             return
         try:
-            rsi = ta.rsi(df["close"], length=14)
+            close = pd.Series([c["close"] for c in candles])
+            rsi = ta.rsi(close, length=14)
             if rsi is None or rsi.dropna().empty:
                 return
             rsi = rsi.fillna(50)
@@ -383,6 +484,43 @@ class MainWindow(QMainWindow):
             self.plot_rsi.setXRange(0, max(1, len(rsi) * 1.05))
         except Exception:
             pass
+
+    def _update_macd_from_candles(self, candles: List[Dict[str, Any]]) -> None:
+        if not candles or len(candles) < 30 or ta is None:
+            return
+        try:
+            close = pd.Series([c["close"] for c in candles])
+            macd = ta.macd(close, fast=12, slow=26, signal=9)
+            if macd is None or not isinstance(macd, pd.DataFrame):
+                return
+            if len(macd.columns) >= 1:
+                self.macd_curve.setData(macd[macd.columns[0]].fillna(0).tolist())
+            if len(macd.columns) >= 2:
+                self.macd_signal_curve.setData(macd[macd.columns[1]].fillna(0).tolist())
+            self.plot_macd.setXRange(0, max(1, len(candles) * 1.05))
+        except Exception:
+            pass
+
+    def _update_ema_from_candles(self, candles: List[Dict[str, Any]]) -> None:
+        if not candles or ta is None:
+            return
+        try:
+            close = pd.Series([c["close"] for c in candles])
+            ema20 = ta.ema(close, length=20)
+            ema50 = ta.ema(close, length=50)
+            if ema20 is not None and not ema20.dropna().empty:
+                self.ema20_curve.setData(ema20.bfill().ffill().tolist())
+            if ema50 is not None and not ema50.dropna().empty:
+                self.ema50_curve.setData(ema50.bfill().ffill().tolist())
+        except Exception:
+            try:
+                if len(candles) >= 20:
+                    close = pd.Series([c["close"] for c in candles])
+                    self.ema20_curve.setData(close.ewm(span=20, adjust=False).mean().tolist())
+                if len(candles) >= 50:
+                    self.ema50_curve.setData(close.ewm(span=50, adjust=False).mean().tolist())
+            except Exception:
+                pass
 
     def _on_play(self) -> None:
         self.data_engine.play()
@@ -425,6 +563,7 @@ class MainWindow(QMainWindow):
             self._update_balance_label()
             self._update_position_label()
             self._add_log_row(closed["record"])
+            self._update_stats()
 
         equity = self.trading_engine.get_equity_at_price(close)
         self._equity_x.append(float(index))
@@ -437,8 +576,30 @@ class MainWindow(QMainWindow):
 
     def _on_stream_finished(self) -> None:
         self.btn_play.setEnabled(False)
+        self.btn_fast_forward.setEnabled(False)
         self.data_engine.pause()
+        self.setWindowTitle("BTC Futures Simülatörü")
         QMessageBox.information(self, "Bilgi", "Veri sonuna ulaşıldı.")
+
+    def _on_fast_forward(self) -> None:
+        self.btn_play.setEnabled(False)
+        self.btn_fast_forward.setEnabled(False)
+        self.data_engine.run_fast_forward(batch_size=100)
+
+    def _update_stats(self) -> None:
+        s = self.trading_engine.get_stats()
+        self.label_win_rate.setText(f"Win Rate: {s['win_rate_pct']:.1f}%")
+        self.label_total_pnl.setText(f"Toplam PnL: {s['total_pnl']:.2f} USDT")
+        self.label_max_dd.setText(f"Max Drawdown: {s['max_drawdown']:.2f} USDT")
+        self.label_total_trades.setText(f"Toplam İşlem: {s['total_trades']}")
+        self.label_commission.setText(f"Toplam Komisyon: {s['total_commission']:.2f} USDT")
+
+    def _on_tab_changed(self, index: int) -> None:
+        if index == 1:
+            self._update_stats()
+
+    def _on_fast_forward_progress(self, current: int, total: int) -> None:
+        self.setWindowTitle(f"BTC Futures Simülatörü — Hızlı Test {current}/{total}")
 
     def _update_balance_label(self) -> None:
         u = self.trading_engine.get_balance_usdt()
@@ -498,6 +659,7 @@ class MainWindow(QMainWindow):
             self._update_balance_label()
             self._update_position_label()
             self._add_log_row(r["record"])
+            self._update_stats()
         else:
             QMessageBox.information(self, "Bilgi", r.get("message", "Açık pozisyon yok."))
 
@@ -513,7 +675,8 @@ class MainWindow(QMainWindow):
         self.table_log.setItem(row, 6, QTableWidgetItem(f"{record.get('roe_pct', 0):.2f}"))
         self.table_log.setItem(row, 7, QTableWidgetItem(record.get("kapanis_sebebi", "")))
         self.table_log.setItem(row, 8, QTableWidgetItem(record.get("tetikleyici", "Manuel")))
-        self.table_log.setItem(row, 9, QTableWidgetItem(f"{record.get('bakiye', 0):.2f}"))
+        self.table_log.setItem(row, 9, QTableWidgetItem(f"{record.get('komisyon', 0):.2f}"))
+        self.table_log.setItem(row, 10, QTableWidgetItem(f"{record.get('bakiye', 0):.2f}"))
 
     def _on_export_csv(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Logları CSV'ye Aktar", "", "CSV (*.csv);;Tüm Dosyalar (*)")

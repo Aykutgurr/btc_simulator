@@ -34,10 +34,12 @@ class TradingEngine:
     - close_position: piyasa fiyatı ile manuel kapatma.
     """
 
+    COMMISSION_RATE = 0.001  # %0.1 pozisyon büyüklüğü (margin * leverage) üzerinden
+
     def __init__(self, initial_usdt: float = 10_000.0):
         self._balance_usdt = float(initial_usdt)
         self._initial_usdt = float(initial_usdt)
-        self._position: Optional[Dict[str, Any]] = None  # tek pozisyon
+        self._position: Optional[Dict[str, Any]] = None
         self._trade_history: List[Dict[str, Any]] = []
 
     def get_balance_usdt(self) -> float:
@@ -58,7 +60,7 @@ class TradingEngine:
         return self._trade_history.copy()
 
     def get_equity_at_price(self, mark_price: float) -> float:
-        """Verilen fiyata göre toplam equity (USDT). Serbest bakiye + pozisyonun anlık değeri."""
+        """Verilen fiyata göre toplam equity (USDT). Bakiye (marjin bloke) + pozisyonun anlık değeri."""
         eq = self._balance_usdt
         if self._position:
             pos = self._position
@@ -69,6 +71,38 @@ class TradingEngine:
             else:
                 eq += size_btc * (entry - mark_price)
         return eq
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Win rate %, toplam PnL, max drawdown, toplam işlem sayısı (tüm zamanlar)."""
+        total = len(self._trade_history)
+        if total == 0:
+            return {
+                "win_rate_pct": 0.0,
+                "total_pnl": 0.0,
+                "max_drawdown": 0.0,
+                "total_trades": 0,
+                "total_commission": 0.0,
+            }
+        wins = sum(1 for r in self._trade_history if r.get("pnl_net", r.get("pnl", 0)) > 0)
+        total_pnl = sum(r.get("pnl_net", r.get("pnl", 0)) for r in self._trade_history)
+        total_commission = sum(r.get("komisyon", 0) for r in self._trade_history)
+        peak = self._initial_usdt
+        max_dd = 0.0
+        running = self._initial_usdt
+        for r in self._trade_history:
+            running = r.get("bakiye", running)
+            if running > peak:
+                peak = running
+            dd = peak - running
+            if dd > max_dd:
+                max_dd = dd
+        return {
+            "win_rate_pct": (wins / total * 100.0) if total else 0.0,
+            "total_pnl": total_pnl,
+            "max_drawdown": max_dd,
+            "total_trades": total,
+            "total_commission": total_commission,
+        }
 
     def open_long(
         self,
@@ -102,6 +136,7 @@ class TradingEngine:
         if margin > available:
             return self._fail(f"Yetersiz bakiye. Gerekli marjin: {margin:.2f}, Mevcut: {available:.2f}")
 
+        self._balance_usdt -= margin
         notional = margin * lev
         size_btc = notional / price
         liq = _liquidation_long(price, lev)
@@ -146,6 +181,7 @@ class TradingEngine:
         if margin > available:
             return self._fail(f"Yetersiz bakiye. Gerekli marjin: {margin:.2f}, Mevcut: {available:.2f}")
 
+        self._balance_usdt -= margin
         notional = margin * lev
         size_btc = notional / price
         liq = _liquidation_short(price, lev)
@@ -201,17 +237,21 @@ class TradingEngine:
         pos = self._position
         entry = pos["entry_price"]
         margin = pos["margin_usdt"]
+        lev = pos["leverage"]
         size_btc = pos["position_size_btc"]
         direction = pos["direction"]
         trigger = tetikleyici if tetikleyici is not None else pos.get("opened_by", "Manuel")
 
+        notional = margin * lev
+        commission = notional * self.COMMISSION_RATE
         if direction == "long":
-            pnl = size_btc * (exit_price - entry)
+            pnl_gross = size_btc * (exit_price - entry)
         else:
-            pnl = size_btc * (entry - exit_price)
+            pnl_gross = size_btc * (entry - exit_price)
+        pnl_net = pnl_gross - commission
 
-        roe_pct = (pnl / margin) * 100.0 if margin else 0.0
-        self._balance_usdt += margin + pnl
+        roe_pct = (pnl_gross / margin) * 100.0 if margin else 0.0
+        self._balance_usdt += margin + pnl_net
         self._position = None
 
         record = {
@@ -220,10 +260,12 @@ class TradingEngine:
             "giris_fiyat": entry,
             "cikis_fiyat": exit_price,
             "marjin": margin,
-            "pnl": pnl,
+            "pnl": pnl_net,
+            "pnl_gross": pnl_gross,
             "roe_pct": roe_pct,
             "kapanis_sebebi": close_reason,
             "tetikleyici": trigger,
+            "komisyon": commission,
             "bakiye": self._balance_usdt,
         }
         self._trade_history.append(record)

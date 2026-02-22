@@ -33,6 +33,7 @@ class DataEngine(QObject):
     candle_emitted = pyqtSignal(dict, int)
     stream_finished = pyqtSignal()
     timeframe_candle_completed = pyqtSignal(str, dict)
+    fast_forward_progress = pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -357,3 +358,36 @@ class DataEngine(QObject):
         }
         self._current_candle = candle
         self.candle_emitted.emit(candle, self._index)
+
+    def run_fast_forward(self, batch_size: int = 100) -> None:
+        """
+        QTimer durdurulur; kalan tüm 1m mumlar batch_size'lık parçalarda işlenir.
+        Her mum için candle_emitted ve gerekirse timeframe_candle_completed yayınlanır.
+        GUI donmaması için tek seferde batch_size kadar işlenip QTimer.singleShot(0, ...) ile devam edilir.
+        """
+        self._timer.stop()
+        total = len(self._df_1m) if self._df_1m is not None else 0
+        if total == 0 or self._index >= total:
+            self.stream_finished.emit()
+            return
+        remaining = total - self._index
+        self._fast_forward_batch(batch_size, total)
+
+    def _fast_forward_batch(self, batch_size: int, total: int) -> None:
+        if self._df_1m is None or self._index >= len(self._df_1m):
+            self.stream_finished.emit()
+            return
+        n = min(batch_size, len(self._df_1m) - self._index)
+        for _ in range(n):
+            prev_index = self._index
+            self._emit_current()
+            self._index += 1
+            self._maybe_emit_timeframe_completed(prev_index)
+            if self._index >= len(self._df_1m):
+                break
+        self.fast_forward_progress.emit(self._index, total)
+        if self._index >= len(self._df_1m):
+            self.stream_finished.emit()
+            return
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self._fast_forward_batch(batch_size, total))
