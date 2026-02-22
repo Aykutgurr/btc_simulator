@@ -3,6 +3,7 @@
 UI: Timeframe selector, sol çizim araç çubuğu, mum/hacim/RSI grafikleri, futures paneli, log.
 """
 
+from datetime import datetime as dt
 from typing import Optional, List, Dict, Any
 
 import pyqtgraph as pg
@@ -28,6 +29,9 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QTabWidget,
     QGridLayout,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTextEdit,
 )
 from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import QPainter, QPicture
@@ -332,6 +336,18 @@ class MainWindow(QMainWindow):
         ctrl_row.addWidget(self.btn_fast_forward)
         main_layout.addLayout(ctrl_row)
 
+        # ----- Canlı İşlem Paneli (Sekme 1 altı) -----
+        live_group = QGroupBox("Canlı İşlem")
+        live_layout = QVBoxLayout(live_group)
+        self.table_live = QTableWidget()
+        self.table_live.setColumnCount(6)
+        self.table_live.setHorizontalHeaderLabels([
+            "Bot İsmi", "Yön", "Giriş", "Güncel SL", "Güncel TP", "Canlı PnL (%)"
+        ])
+        self.table_live.horizontalHeader().setStretchLastSection(True)
+        live_layout.addWidget(self.table_live)
+        main_layout.addWidget(live_group)
+
         self.tabs.addTab(tab1, "Grafik & İşlem")
 
         # ========== SEKME 2: Botlar & İstatistikler ==========
@@ -361,6 +377,18 @@ class MainWindow(QMainWindow):
         stats_grid.addWidget(self.label_total_trades, 1, 1)
         stats_grid.addWidget(self.label_commission, 2, 0)
         tab2_layout.addWidget(stats_group)
+        bot_stats_group = QGroupBox("Bot Bazlı İstatistikler")
+        bot_stats_layout = QVBoxLayout(bot_stats_group)
+        self.tree_bot_stats = QTreeWidget()
+        self.tree_bot_stats.setHeaderLabels(["Metrik", "Değer"])
+        self.tree_bot_stats.setColumnCount(2)
+        bot_stats_layout.addWidget(self.tree_bot_stats)
+        tab2_layout.addWidget(bot_stats_group)
+        tab2_layout.addWidget(QLabel("Bot Logları (hata / bilgi):"))
+        self.text_bot_log = QTextEdit()
+        self.text_bot_log.setReadOnly(True)
+        self.text_bot_log.setMaximumHeight(120)
+        tab2_layout.addWidget(self.text_bot_log)
         tab2_layout.addStretch()
         self.tabs.addTab(tab2, "Botlar & İstatistikler")
 
@@ -565,6 +593,11 @@ class MainWindow(QMainWindow):
             self._add_log_row(closed["record"])
             self._update_stats()
 
+        self._update_live_trades_table(close)
+        self._sync_log_table_from_history()
+        for msg in self.trading_engine.get_and_clear_log_messages():
+            self.text_bot_log.append(msg.strip())
+
         equity = self.trading_engine.get_equity_at_price(close)
         self._equity_x.append(float(index))
         self._equity_y.append(equity)
@@ -593,6 +626,70 @@ class MainWindow(QMainWindow):
         self.label_max_dd.setText(f"Max Drawdown: {s['max_drawdown']:.2f} USDT")
         self.label_total_trades.setText(f"Toplam İşlem: {s['total_trades']}")
         self.label_commission.setText(f"Toplam Komisyon: {s['total_commission']:.2f} USDT")
+        self._update_bot_stats_tree()
+
+    def _update_live_trades_table(self, current_price: float) -> None:
+        """Canlı işlem tablosunu günceller (her 1m mumda)."""
+        pos = self.trading_engine.get_position()
+        self.table_live.setRowCount(0)
+        if pos is None:
+            return
+        row = self.table_live.rowCount()
+        self.table_live.insertRow(row)
+        entry = pos["entry_price"]
+        if pos["direction"] == "long":
+            pnl_pct = (current_price - entry) / entry * 100.0
+        else:
+            pnl_pct = (entry - current_price) / entry * 100.0
+        self.table_live.setItem(row, 0, QTableWidgetItem(pos.get("opened_by", "Manuel")))
+        self.table_live.setItem(row, 1, QTableWidgetItem(pos["direction"].upper()))
+        self.table_live.setItem(row, 2, QTableWidgetItem(f"{entry:.2f}"))
+        sl = pos.get("stop_loss")
+        tp = pos.get("take_profit")
+        self.table_live.setItem(row, 3, QTableWidgetItem(f"{sl:.2f}" if sl is not None else "-"))
+        self.table_live.setItem(row, 4, QTableWidgetItem(f"{tp:.2f}" if tp is not None else "-"))
+        self.table_live.setItem(row, 5, QTableWidgetItem(f"{pnl_pct:.2f}%"))
+
+    def _sync_log_table_from_history(self) -> None:
+        """İşlem geçmişindeki yeni kayıtları tabloya ekler (kısmi kapanış vb.)."""
+        history = self.trading_engine.get_trade_history()
+        current_rows = self.table_log.rowCount()
+        if len(history) <= current_rows:
+            return
+        for r in history[current_rows:]:
+            self._add_log_row(r)
+
+    def _update_bot_stats_tree(self) -> None:
+        """Bot bazlı istatistikleri QTreeWidget'ta gösterir."""
+        self.tree_bot_stats.clear()
+        history = self.trading_engine.get_trade_history()
+        if not history:
+            return
+        by_bot: Dict[str, List[Dict]] = {}
+        for r in history:
+            bot_name = r.get("tetikleyici") or "Manuel"
+            by_bot.setdefault(bot_name, []).append(r)
+        for bot_name, recs in by_bot.items():
+            parent = QTreeWidgetItem(self.tree_bot_stats, [bot_name, ""])
+            wins = sum(1 for r in recs if r.get("pnl", 0) > 0)
+            total = len(recs)
+            win_rate = (wins / total * 100.0) if total else 0.0
+            parent.addChild(QTreeWidgetItem(["Win Rate (%)", f"{win_rate:.1f}"]))
+            durations_min = []
+            for r in recs:
+                et = r.get("entry_time") or ""
+                xt = r.get("exit_time") or r.get("tarih") or ""
+                if et and xt:
+                    try:
+                        t0 = dt.strptime(et, "%Y-%m-%d %H:%M:%S")
+                        t1 = dt.strptime(xt, "%Y-%m-%d %H:%M:%S")
+                        durations_min.append((t1 - t0).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+            avg_min = sum(durations_min) / len(durations_min) if durations_min else 0.0
+            parent.addChild(QTreeWidgetItem(["Ortalama İşlem Süresi (Dakika)", f"{avg_min:.1f}"]))
+            parent.addChild(QTreeWidgetItem(["Toplam İşlem", str(total)]))
+        self.tree_bot_stats.expandAll()
 
     def _on_tab_changed(self, index: int) -> None:
         if index == 1:

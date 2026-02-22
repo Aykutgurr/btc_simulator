@@ -41,6 +41,17 @@ class TradingEngine:
         self._initial_usdt = float(initial_usdt)
         self._position: Optional[Dict[str, Any]] = None
         self._trade_history: List[Dict[str, Any]] = []
+        self._log_messages: List[str] = []
+
+    def log_message(self, msg: str) -> None:
+        """UI'da gösterilmek üzere log mesajı ekler."""
+        self._log_messages.append(msg)
+
+    def get_and_clear_log_messages(self) -> List[str]:
+        """Biriktirilmiş log mesajlarını döndürür ve listeyi temizler."""
+        out = self._log_messages.copy()
+        self._log_messages.clear()
+        return out
 
     def get_balance_usdt(self) -> float:
         """Toplam USDT (serbest + bloke marjin)."""
@@ -140,6 +151,7 @@ class TradingEngine:
         notional = margin * lev
         size_btc = notional / price
         liq = _liquidation_long(price, lev)
+        entry_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._position = {
             "entry_price": price,
             "direction": "long",
@@ -150,6 +162,7 @@ class TradingEngine:
             "take_profit": float(take_profit) if take_profit is not None else None,
             "position_size_btc": size_btc,
             "opened_by": opened_by or "Manuel",
+            "entry_time": entry_time_str,
         }
         return {"success": True, "message": "Long açıldı.", "position": self._position.copy()}
 
@@ -185,6 +198,7 @@ class TradingEngine:
         notional = margin * lev
         size_btc = notional / price
         liq = _liquidation_short(price, lev)
+        entry_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._position = {
             "entry_price": price,
             "direction": "short",
@@ -195,6 +209,7 @@ class TradingEngine:
             "take_profit": float(take_profit) if take_profit is not None else None,
             "position_size_btc": size_btc,
             "opened_by": opened_by or "Manuel",
+            "entry_time": entry_time_str,
         }
         return {"success": True, "message": "Short açıldı.", "position": self._position.copy()}
 
@@ -203,6 +218,77 @@ class TradingEngine:
         if self._position is None:
             return self._fail("Açık pozisyon yok.")
         return self._do_close(exit_price, "Manuel (Market)", None)
+
+    def close_partial(self, exit_price: float, fraction: float = 0.5) -> Dict[str, Any]:
+        """
+        Açık pozisyonun belirtilen oranını piyasa fiyatından kapatır.
+        fraction: 0-1 arası (örn. 0.5 = %50). Realize edilen kâr bakiyeye eklenir,
+        kalan miktar opened_by korunarak güncellenir.
+        """
+        if self._position is None:
+            return self._fail("Açık pozisyon yok.")
+        try:
+            frac = float(fraction)
+        except (TypeError, ValueError):
+            return self._fail("Geçersiz oran.")
+        if frac <= 0 or frac >= 1:
+            return self._fail("Oran 0 ile 1 arasında olmalı (örn. 0.5).")
+        pos = self._position
+        entry = pos["entry_price"]
+        margin = pos["margin_usdt"]
+        lev = pos["leverage"]
+        size_btc = pos["position_size_btc"]
+        direction = pos["direction"]
+        notional = margin * lev
+        commission_partial = (frac * notional) * self.COMMISSION_RATE
+        if direction == "long":
+            pnl_gross = frac * size_btc * (exit_price - entry)
+        else:
+            pnl_gross = frac * size_btc * (entry - exit_price)
+        pnl_net = pnl_gross - commission_partial
+        self._balance_usdt += frac * margin + pnl_net
+        # Kalan pozisyonu güncelle
+        pos["margin_usdt"] = (1 - frac) * margin
+        pos["position_size_btc"] = (1 - frac) * size_btc
+        entry_time = pos.get("entry_time", "")
+        exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        record = {
+            "tarih": exit_time_str,
+            "yon": "Long" if direction == "long" else "Short",
+            "giris_fiyat": entry,
+            "cikis_fiyat": exit_price,
+            "marjin": frac * margin,
+            "pnl": pnl_net,
+            "pnl_gross": pnl_gross,
+            "roe_pct": (pnl_gross / (frac * margin) * 100.0) if margin else 0.0,
+            "kapanis_sebebi": "Kısmi Kapanış",
+            "tetikleyici": pos.get("opened_by", "Manuel"),
+            "komisyon": commission_partial,
+            "bakiye": self._balance_usdt,
+            "entry_time": entry_time,
+            "exit_time": exit_time_str,
+        }
+        self._trade_history.append(record)
+        return {
+            "partial": True,
+            "record": record,
+            "balance_usdt": self._balance_usdt,
+            "position": self._position.copy(),
+        }
+
+    def update_position_parameters(
+        self,
+        new_sl: Optional[float] = None,
+        new_tp: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Aktif pozisyonun SL ve TP değerlerini günceller."""
+        if self._position is None:
+            return self._fail("Açık pozisyon yok.")
+        if new_sl is not None:
+            self._position["stop_loss"] = float(new_sl)
+        if new_tp is not None:
+            self._position["take_profit"] = float(new_tp)
+        return {"success": True, "position": self._position.copy()}
 
     def check_price(self, current_price: float) -> Optional[Dict[str, Any]]:
         """
@@ -254,8 +340,10 @@ class TradingEngine:
         self._balance_usdt += margin + pnl_net
         self._position = None
 
+        exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry_time = pos.get("entry_time", "")
         record = {
-            "tarih": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "tarih": exit_time_str,
             "yon": "Long" if direction == "long" else "Short",
             "giris_fiyat": entry,
             "cikis_fiyat": exit_price,
@@ -267,6 +355,8 @@ class TradingEngine:
             "tetikleyici": trigger,
             "komisyon": commission,
             "bakiye": self._balance_usdt,
+            "entry_time": entry_time,
+            "exit_time": exit_time_str,
         }
         self._trade_history.append(record)
         return {"closed": True, "record": record, "balance_usdt": self._balance_usdt}

@@ -11,8 +11,8 @@ from datetime import datetime
 import pandas as pd
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
-# Pandas resample frekansları
-TF_MAP = {"1m": "1T", "5m": "5T", "15m": "15T", "1h": "1H", "4h": "4H"}
+# Pandas resample frekansları (2.2+ uyumlu: T/H yerine min/h)
+TF_MAP = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h"}
 
 # Hız preset: (timer_ms, her tick'te ilerletilen mum sayısı)
 SPEED_PRESETS = {
@@ -274,7 +274,12 @@ class DataEngine(QObject):
                 })
             return out
 
-        freq = TF_MAP.get(tf, "1T")
+        freq = TF_MAP.get(tf, "1min")
+        # Resample öncesi index'in datetime olduğundan emin ol
+        if not pd.api.types.is_datetime64_any_dtype(slice_1m.index):
+            slice_1m = slice_1m.copy()
+            slice_1m.index = pd.to_datetime(slice_1m.index, errors="coerce")
+            slice_1m = slice_1m[slice_1m.index.notna()]
         try:
             res = slice_1m.resample(freq).agg({
                 "open": "first",
@@ -283,7 +288,8 @@ class DataEngine(QObject):
                 "close": "last",
                 "volume": "sum",
             }).dropna(how="all")
-        except Exception:
+        except Exception as e:
+            print(f"Resample işlemi sırasında hata oluştu: {e}")
             return []
         out = []
         for ts, row in res.iterrows():

@@ -50,7 +50,7 @@ def main():
     if not data_engine.has_data():
         data_engine.generate_mock_data(800)
 
-    bots_list = get_bots(trading_engine)
+    bots_list = get_bots(trading_engine, data_engine)
     window = MainWindow(data_engine, trading_engine, bots=bots_list)
     window.show()
     sys.exit(app.exec_())

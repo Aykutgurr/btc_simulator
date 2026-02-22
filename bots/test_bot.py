@@ -45,7 +45,7 @@ class TestBot15m:
             if pos is not None:
                 return
             balance = self._engine.get_balance_usdt()
-            margin = balance * 0.05
+            margin = balance * 0.5 # %5 marjinli hali eskiden 0.05 ti
             if margin < 10:
                 return
             leverage = 5.0
