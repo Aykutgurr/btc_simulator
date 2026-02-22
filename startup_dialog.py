@@ -185,10 +185,9 @@ class StartupDialog(QDialog):
         if os.path.isfile(csv_path):
             try:
                 df = pd.read_csv(csv_path, nrows=5)
-                for c in ("timestamp", "date", "datetime", "time"):
-                    if c in df.columns:
-                        break
-                else:
+                has_time = any(c in df.columns for c in ("timestamp", "date", "datetime", "time"))
+                has_ohlc = {"open", "high", "low", "close"}.issubset(df.columns)
+                if not (has_time and has_ohlc):
                     csv_path = ""
             except Exception:
                 csv_path = ""
