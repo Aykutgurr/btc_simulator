@@ -5,3 +5,4 @@ numpy>=1.20
 pandas-ta>=0.3.14b
 yfinance>=0.2
 ccxt>=4.0
+xgboost>=2.0
