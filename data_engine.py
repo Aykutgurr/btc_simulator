@@ -13,6 +13,8 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 # Pandas resample frekansları (2.2+ uyumlu: T/H yerine min/h)
 TF_MAP = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h"}
+# 1m bar sayısı ile mum kapanışı (5m=5, 15m=15, 1h=60, 4h=240)
+TF_BARS = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}
 
 # Hız preset: (timer_ms, her tick'te ilerletilen mum sayısı)
 SPEED_PRESETS = {
@@ -132,13 +134,16 @@ class DataEngine(QObject):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> None:
-        """Veriyi tarih aralığına göre filtreler (load_csv/load_from_dataframe sonrası veya mock sonrası)."""
+        """Veriyi tarih aralığına göre filtreler. Filtre sonucu boş kalırsa orijinal veriyi korur (simülasyon boş kalmaz)."""
         if self._df_1m is None or self._df_1m.empty:
             return
+        backup = self._df_1m
         if start_date is not None:
             self._df_1m = self._df_1m[self._df_1m.index >= pd.Timestamp(start_date)]
         if end_date is not None:
             self._df_1m = self._df_1m[self._df_1m.index <= pd.Timestamp(end_date)]
+        if self._df_1m.empty:
+            self._df_1m = backup
 
     def generate_mock_data(self, num_bars: int = 800) -> None:
         """1 dakikalık mock OHLCV; DatetimeIndex ile."""
@@ -327,28 +332,31 @@ class DataEngine(QObject):
             self.stream_finished.emit()
 
     def _maybe_emit_timeframe_completed(self, completed_1m_index: int) -> None:
-        """15m mum tamamlandıysa (her 15. bar) timeframe_candle_completed yayınla."""
-        if completed_1m_index <= 0 or (completed_1m_index + 1) % 15 != 0:
+        """Her timeframe (5m, 15m, 1h, 4h) için mum tamamlandıysa timeframe_candle_completed yayınla; botlar kendi TF'lerini alır."""
+        if completed_1m_index <= 0:
             return
-        start_i = completed_1m_index - 14
-        end_i = completed_1m_index + 1
-        if end_i > len(self._df_1m):
-            return
-        try:
-            slice_15 = self._df_1m.iloc[start_i:end_i]
-            row_first = slice_15.iloc[0]
-            row_last = slice_15.iloc[-1]
-            candle_15 = {
-                "time": str(slice_15.index[-1]),
-                "open": float(row_first["open"]),
-                "high": float(slice_15["high"].max()),
-                "low": float(slice_15["low"].min()),
-                "close": float(row_last["close"]),
-                "volume": float(slice_15["volume"].sum()),
-            }
-            self.timeframe_candle_completed.emit("15m", candle_15)
-        except Exception:
-            pass
+        for tf, n_bars in TF_BARS.items():
+            if (completed_1m_index + 1) % n_bars != 0:
+                continue
+            start_i = completed_1m_index - n_bars + 1
+            end_i = completed_1m_index + 1
+            if start_i < 0 or end_i > len(self._df_1m):
+                continue
+            try:
+                slice_tf = self._df_1m.iloc[start_i:end_i]
+                row_first = slice_tf.iloc[0]
+                row_last = slice_tf.iloc[-1]
+                candle_tf = {
+                    "time": str(slice_tf.index[-1]),
+                    "open": float(row_first["open"]),
+                    "high": float(slice_tf["high"].max()),
+                    "low": float(slice_tf["low"].min()),
+                    "close": float(row_last["close"]),
+                    "volume": float(slice_tf["volume"].sum()),
+                }
+                self.timeframe_candle_completed.emit(tf, candle_tf)
+            except Exception:
+                pass
 
     def _emit_current(self) -> None:
         if self._df_1m is None or self._index >= len(self._df_1m):

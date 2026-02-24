@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
 
         self._equity_x: List[float] = []
         self._equity_y: List[float] = []
+        self._fast_forward_active = False
 
         # Sol toolbar
         left_toolbar = QFrame()
@@ -584,9 +585,17 @@ class MainWindow(QMainWindow):
 
     def _on_candle(self, candle: Dict[str, Any], index: int) -> None:
         close = candle["close"]
-        self._refresh_display_candles()
 
         closed = self.trading_engine.check_price(close)
+
+        if self._fast_forward_active:
+            # Hızlı simülasyon: sadece motor çalışır; grafik/UI atlanır, sonunda tek seferde güncellenir
+            equity = self.trading_engine.get_equity_at_price(close)
+            self._equity_x.append(float(index))
+            self._equity_y.append(equity)
+            return
+
+        self._refresh_display_candles()
         if closed:
             self._update_balance_label()
             self._update_position_label()
@@ -612,11 +621,31 @@ class MainWindow(QMainWindow):
         self.btn_fast_forward.setEnabled(False)
         self.data_engine.pause()
         self.setWindowTitle("BTC Futures Simülatörü")
+
+        if self._fast_forward_active:
+            # Hızlı simülasyon bitti: grafik ve tüm UI tek seferde güncellenir
+            self._refresh_display_candles()
+            self._update_balance_label()
+            self._update_position_label()
+            self._update_stats()
+            price = self.data_engine.get_current_price()
+            if price is not None:
+                self._update_live_trades_table(price)
+            self._sync_log_table_from_history()
+            if self._equity_x and self._equity_y:
+                self.equity_curve.setData(self._equity_x, self._equity_y)
+                self.plot_equity.setXRange(0, max(self._equity_x) * 1.05)
+                self.plot_equity.setYRange(min(self._equity_y) * 0.99, max(self._equity_y) * 1.01)
+            for msg in self.trading_engine.get_and_clear_log_messages():
+                self.text_bot_log.append(msg.strip())
+            self._fast_forward_active = False
+
         QMessageBox.information(self, "Bilgi", "Veri sonuna ulaşıldı.")
 
     def _on_fast_forward(self) -> None:
         self.btn_play.setEnabled(False)
         self.btn_fast_forward.setEnabled(False)
+        self._fast_forward_active = True
         self.data_engine.run_fast_forward(batch_size=100)
 
     def _update_stats(self) -> None:

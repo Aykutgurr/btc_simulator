@@ -8,8 +8,8 @@ from datetime import datetime, date, timedelta
 
 import pandas as pd
 
-# yfinance 1m veri için istek başına en fazla 8 gün
-YFINANCE_1M_MAX_DAYS_PER_REQUEST = 8
+# yfinance 1m: istek başına en fazla 7 gün (Yahoo 8 gün sınırı; 7 ile güvende kal)
+YFINANCE_1M_MAX_DAYS_PER_REQUEST = 7
 from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -37,12 +37,19 @@ class FetchWorker(QThread):
 
     def run(self):
         try:
-            self.progress.emit("Veri kaynağı deneniyor (yfinance)...")
+            self.progress.emit("Veri kaynağı deneniyor (yfinance 1m)...")
             df = self._fetch_yfinance()
             if df is not None and not df.empty:
                 self.progress.emit("Veri alındı, kaydediliyor...")
                 self.finished.emit(True, df)
                 return
+            for interval, minutes in [("5m", 5), ("15m", 15), ("1h", 60)]:
+                self.progress.emit(f"yfinance 1m yok, {interval} deneniyor...")
+                df = self._fetch_yfinance_interval(interval, minutes)
+                if df is not None and not df.empty:
+                    self.progress.emit("Veri alındı, kaydediliyor...")
+                    self.finished.emit(True, df)
+                    return
             self.progress.emit("yfinance uygun değil, ccxt deneniyor...")
             df = self._fetch_ccxt()
             if df is not None and not df.empty:
@@ -55,7 +62,7 @@ class FetchWorker(QThread):
             self.finished.emit(False, None)
 
     def _fetch_yfinance(self):
-        """1m veriyi 8 günlük parçalarda çeker (yfinance limiti); parçaları birleştirir."""
+        """1m veriyi 7 günlük parçalarda çeker (Yahoo ~8 gün limiti); parçaları birleştirir."""
         try:
             import yfinance as yf
             ticker = yf.Ticker("BTC-USD")
@@ -63,12 +70,13 @@ class FetchWorker(QThread):
             current = datetime.combine(self.start_date, datetime.min.time())
             end_dt = datetime.combine(self.end_date, datetime.max.time())
             chunk_days = YFINANCE_1M_MAX_DAYS_PER_REQUEST
-            total_days = (end_dt - current).days + 1
             part = 0
             while current < end_dt:
                 part += 1
-                chunk_end = min(current + timedelta(days=chunk_days), end_dt)
-                self.progress.emit(f"yfinance: parça {part} çekiliyor ({current.date()} - {chunk_end.date()})...")
+                chunk_end = current + timedelta(days=chunk_days)
+                if chunk_end > end_dt:
+                    chunk_end = end_dt
+                self.progress.emit(f"yfinance 1m: parça {part} ({current.date()} - {chunk_end.date()})...")
                 start_str = current.strftime("%Y-%m-%d")
                 end_str = (chunk_end + timedelta(days=1)).strftime("%Y-%m-%d")
                 df_chunk = ticker.history(start=start_str, end=end_str, interval="1m")
@@ -90,6 +98,57 @@ class FetchWorker(QThread):
             df = df.sort_index()
             df.index.name = "datetime"
             if len(df) < 10:
+                return None
+            return df
+        except Exception:
+            return None
+
+    def _expand_to_1m(self, df: pd.DataFrame, minutes_per_bar: int) -> pd.DataFrame:
+        """5m/15m/1h OHLCV'yi sentetik 1m çubuklara genişletir (her bar N adet 1m bar)."""
+        if df is None or df.empty or minutes_per_bar < 2:
+            return df
+        rows = []
+        for ts, row in df.iterrows():
+            t = pd.Timestamp(ts)
+            vol_each = float(row["volume"]) / minutes_per_bar
+            for i in range(minutes_per_bar):
+                t_i = t + pd.Timedelta(minutes=i)
+                rows.append({
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": vol_each,
+                    "datetime": t_i,
+                })
+        out = pd.DataFrame(rows)
+        out = out.set_index("datetime").sort_index()
+        out.index.name = "datetime"
+        return out
+
+    def _fetch_yfinance_interval(self, interval: str, minutes_per_bar: int):
+        """Belirtilen aralıkta (5m, 15m, 1h) veri çeker ve sentetik 1m'ye genişletir."""
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker("BTC-USD")
+            start_str = self.start_date.strftime("%Y-%m-%d")
+            end_str = (self.end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+            self.progress.emit(f"yfinance {interval} çekiliyor, 1m'ye dönüştürülüyor...")
+            df = ticker.history(start=start_str, end=end_str, interval=interval)
+            if df is None or df.empty or len(df) < 2:
+                return None
+            df = df.rename(columns={
+                "Open": "open", "High": "high", "Low": "low",
+                "Close": "close", "Volume": "volume"
+            })
+            df = df[["open", "high", "low", "close", "volume"]].copy()
+            df.index = pd.to_datetime(df.index)
+            df = df[(df.index >= pd.Timestamp(self.start_date)) & (df.index <= pd.Timestamp(self.end_date))]
+            if df.empty or len(df) < 2:
+                return None
+            df = self._expand_to_1m(df, minutes_per_bar)
+            df = df[(df.index >= pd.Timestamp(datetime.combine(self.start_date, datetime.min.time()))) & (df.index <= pd.Timestamp(datetime.combine(self.end_date, datetime.max.time())))]
+            if df.empty or len(df) < 10:
                 return None
             return df
         except Exception:

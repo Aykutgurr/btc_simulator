@@ -160,7 +160,6 @@ class TestBotV2:
                 max_depth=5,
                 learning_rate=0.1,
                 random_state=42,
-                use_label_encoder=False,
                 eval_metric="logloss",
             )
             self.model.fit(X_clean, y_clean)

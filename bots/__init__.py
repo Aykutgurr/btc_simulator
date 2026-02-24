@@ -8,7 +8,7 @@ from typing import List, Any
 from .test_bot import TestBot15m
 from .test_bot_v2 import TestBotV2
 from .para_makinasi1 import ParaMakinasi1
-from .aykutun_sag_tassagi import AykutunSagTassagi
+from .deneme import AykutunSagTassagi
 
 
 def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
