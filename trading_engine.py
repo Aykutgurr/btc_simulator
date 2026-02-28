@@ -363,3 +363,11 @@ class TradingEngine:
 
     def _fail(self, message: str) -> Dict[str, Any]:
         return {"success": False, "message": message}
+
+    def reset(self, initial_usdt: Optional[float] = None) -> None:
+        """Bakiye ve pozisyonu sıfırlar; isteğe bağlı yeni başlangıç bakiyesi."""
+        amount = float(initial_usdt) if initial_usdt is not None else self._initial_usdt
+        self._balance_usdt = amount
+        self._position = None
+        self._trade_history.clear()
+        self._log_messages.clear()

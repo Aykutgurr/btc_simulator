@@ -251,6 +251,12 @@ class DataEngine(QObject):
     def has_data(self) -> bool:
         return self._df_1m is not None and len(self._df_1m) > 0
 
+    def reset_to_start(self) -> None:
+        """Simülasyonu başa alır: indeks ve güncel mum sıfırlanır."""
+        self._index = 0
+        self._current_candle = None
+        self._timer.stop()
+
     def is_at_end(self) -> bool:
         return self._df_1m is not None and self._index >= len(self._df_1m)
 

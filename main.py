@@ -6,7 +6,7 @@ BTC Vadeli İşlem Simülatörü — Ana giriş noktası.
 
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, date
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QCoreApplication
@@ -31,7 +31,7 @@ def main():
     csv_path = dialog.get_csv_path()
     df_fetched = dialog.get_fetched_dataframe()
     start_dt = datetime.combine(start_date, datetime.min.time())
-    end_dt = datetime.combine(end_date, datetime.max.time())
+    end_dt = datetime.now() if end_date == date.today() else datetime.combine(end_date, datetime.max.time())
 
     data_engine = DataEngine()
     trading_engine = TradingEngine(initial_usdt=10_000.0)
@@ -51,7 +51,12 @@ def main():
         data_engine.generate_mock_data(800)
 
     bots_list = get_bots(trading_engine, data_engine)
-    window = MainWindow(data_engine, trading_engine, bots=bots_list)
+    window = MainWindow(
+        data_engine,
+        trading_engine,
+        bots=bots_list,
+        get_bots=get_bots,
+    )
     window.show()
     sys.exit(app.exec_())
 

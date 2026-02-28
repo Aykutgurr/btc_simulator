@@ -35,6 +35,12 @@ class FetchWorker(QThread):
         self.start_date = start_date
         self.end_date = end_date
 
+    def _end_dt(self):
+        """Bitiş anı: bugün seçiliyse şu an, değilse seçilen günün sonu."""
+        if self.end_date == date.today():
+            return datetime.now()
+        return datetime.combine(self.end_date, datetime.max.time())
+
     def run(self):
         try:
             self.progress.emit("Veri kaynağı deneniyor (yfinance 1m)...")
@@ -68,7 +74,7 @@ class FetchWorker(QThread):
             ticker = yf.Ticker("BTC-USD")
             chunks = []
             current = datetime.combine(self.start_date, datetime.min.time())
-            end_dt = datetime.combine(self.end_date, datetime.max.time())
+            end_dt = self._end_dt()
             chunk_days = YFINANCE_1M_MAX_DAYS_PER_REQUEST
             part = 0
             while current < end_dt:
@@ -132,7 +138,8 @@ class FetchWorker(QThread):
             import yfinance as yf
             ticker = yf.Ticker("BTC-USD")
             start_str = self.start_date.strftime("%Y-%m-%d")
-            end_str = (self.end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+            end_dt = self._end_dt()
+            end_str = (end_dt.date() + timedelta(days=1)).strftime("%Y-%m-%d")
             self.progress.emit(f"yfinance {interval} çekiliyor, 1m'ye dönüştürülüyor...")
             df = ticker.history(start=start_str, end=end_str, interval=interval)
             if df is None or df.empty or len(df) < 2:
@@ -143,11 +150,11 @@ class FetchWorker(QThread):
             })
             df = df[["open", "high", "low", "close", "volume"]].copy()
             df.index = pd.to_datetime(df.index)
-            df = df[(df.index >= pd.Timestamp(self.start_date)) & (df.index <= pd.Timestamp(self.end_date))]
+            df = df[(df.index >= pd.Timestamp(self.start_date)) & (df.index <= pd.Timestamp(end_dt))]
             if df.empty or len(df) < 2:
                 return None
             df = self._expand_to_1m(df, minutes_per_bar)
-            df = df[(df.index >= pd.Timestamp(datetime.combine(self.start_date, datetime.min.time()))) & (df.index <= pd.Timestamp(datetime.combine(self.end_date, datetime.max.time())))]
+            df = df[(df.index >= pd.Timestamp(datetime.combine(self.start_date, datetime.min.time()))) & (df.index <= pd.Timestamp(end_dt))]
             if df.empty or len(df) < 10:
                 return None
             return df
@@ -159,7 +166,7 @@ class FetchWorker(QThread):
             import ccxt
             exchange = ccxt.binance({"enableRateLimit": True})
             since = int(datetime.combine(self.start_date, datetime.min.time()).timestamp() * 1000)
-            end_ts = int(datetime.combine(self.end_date, datetime.max.time()).timestamp() * 1000)
+            end_ts = int(self._end_dt().timestamp() * 1000)
             all_ohlcv = []
             while since < end_ts:
                 ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1m", since=since, limit=1000)
@@ -174,7 +181,7 @@ class FetchWorker(QThread):
             df = pd.DataFrame(all_ohlcv, columns=["datetime", "open", "high", "low", "close", "volume"])
             df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
             df = df.set_index("datetime")
-            df = df[(df.index >= pd.Timestamp(self.start_date)) & (df.index <= pd.Timestamp(self.end_date))]
+            df = df[(df.index >= pd.Timestamp(self.start_date)) & (df.index <= pd.Timestamp(self._end_dt()))]
             if df.empty or len(df) < 10:
                 return None
             return df
@@ -203,14 +210,14 @@ class StartupDialog(QDialog):
         self.date_start.setCalendarPopup(True)
         self.date_start.setDate(QDate(2025, 1, 15))
         self.date_start.setMinimumDate(QDate(2025, 1, 1))
-        self.date_start.setMaximumDate(QDate(2026, 2, 20))
+        self.date_start.setMaximumDate(QDate.currentDate())
         gl.addWidget(self.date_start)
-        gl.addWidget(QLabel("Bitiş Tarihi (en geç 20 Şubat 2026):"))
+        gl.addWidget(QLabel("Bitiş Tarihi (bugüne kadar; bugün seçilirse güncel veri çekilir):"))
         self.date_end = QDateEdit()
         self.date_end.setCalendarPopup(True)
-        self.date_end.setDate(QDate(2025, 2, 20))
+        self.date_end.setDate(QDate.currentDate())
         self.date_end.setMinimumDate(QDate(2025, 1, 1))
-        self.date_end.setMaximumDate(QDate(2026, 2, 20))
+        self.date_end.setMaximumDate(QDate.currentDate())
         gl.addWidget(self.date_end)
         layout.addWidget(grp)
 

@@ -3,8 +3,8 @@
 UI: Timeframe selector, sol çizim araç çubuğu, mum/hacim/RSI grafikleri, futures paneli, log.
 """
 
-from datetime import datetime as dt
-from typing import Optional, List, Dict, Any
+from datetime import datetime as dt, date
+from typing import Optional, List, Dict, Any, Callable
 
 import pyqtgraph as pg
 import pandas as pd
@@ -120,11 +120,13 @@ class MainWindow(QMainWindow):
         data_engine: DataEngine,
         trading_engine: TradingEngine,
         bots: Optional[List[Any]] = None,
+        get_bots: Optional[Callable[..., List[Any]]] = None,
     ):
         super().__init__()
         self.data_engine = data_engine
         self.trading_engine = trading_engine
         self._bots = bots or []
+        self._get_bots = get_bots
         self._bot_checkboxes: Dict[str, QCheckBox] = {}
         self.setWindowTitle("BTC Futures Simülatörü")
         self.setMinimumSize(1100, 750)
@@ -331,10 +333,16 @@ class MainWindow(QMainWindow):
         self.btn_pause.clicked.connect(self._on_pause)
         self.btn_step.clicked.connect(self._on_step)
         self.btn_fast_forward.clicked.connect(self._on_fast_forward)
+        self.btn_restart = QPushButton("Baştan Simüle Et")
+        self.btn_restart.clicked.connect(self._on_restart_simulation)
+        self.btn_new_dates = QPushButton("Farklı Tarihlerle Simüle Et")
+        self.btn_new_dates.clicked.connect(self._on_simulate_different_dates)
         ctrl_row.addWidget(self.btn_play)
         ctrl_row.addWidget(self.btn_pause)
         ctrl_row.addWidget(self.btn_step)
         ctrl_row.addWidget(self.btn_fast_forward)
+        ctrl_row.addWidget(self.btn_restart)
+        ctrl_row.addWidget(self.btn_new_dates)
         main_layout.addLayout(ctrl_row)
 
         # ----- Canlı İşlem Paneli (Sekme 1 altı) -----
@@ -355,15 +363,15 @@ class MainWindow(QMainWindow):
         tab2 = QWidget()
         tab2_layout = QVBoxLayout(tab2)
         bot_group = QGroupBox("Bot Yöneticisi")
-        bot_layout = QVBoxLayout(bot_group)
+        self._bot_layout = QVBoxLayout(bot_group)
         for bot in self._bots:
             cb = QCheckBox(getattr(bot, "name", str(bot)))
             cb.setChecked(False)
             self._bot_checkboxes[getattr(bot, "name", str(bot))] = cb
-            bot_layout.addWidget(cb)
+            self._bot_layout.addWidget(cb)
         if not self._bots:
-            bot_layout.addWidget(QLabel("Tanımlı bot yok."))
-        bot_layout.addStretch()
+            self._bot_layout.addWidget(QLabel("Tanımlı bot yok."))
+        self._bot_layout.addStretch()
         tab2_layout.addWidget(bot_group)
         stats_group = QGroupBox("Gelişmiş İstatistikler (Tüm Zamanlar / Anlık Test)")
         stats_grid = QGridLayout(stats_group)
@@ -647,6 +655,100 @@ class MainWindow(QMainWindow):
         self.btn_fast_forward.setEnabled(False)
         self._fast_forward_active = True
         self.data_engine.run_fast_forward(batch_size=100)
+
+    def _rebuild_bot_checkboxes(self) -> None:
+        """Bot listesine göre checkbox'ları yeniden oluşturur."""
+        while self._bot_layout.count():
+            item = self._bot_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._bot_checkboxes.clear()
+        for bot in self._bots:
+            cb = QCheckBox(getattr(bot, "name", str(bot)))
+            cb.setChecked(False)
+            self._bot_checkboxes[getattr(bot, "name", str(bot))] = cb
+            self._bot_layout.insertWidget(self._bot_layout.count(), cb)
+        if not self._bots:
+            self._bot_layout.insertWidget(0, QLabel("Tanımlı bot yok."))
+        self._bot_layout.addStretch()
+
+    def _on_restart_simulation(self) -> None:
+        """Simülasyonu başa alır; motor ve botlar sıfırlanır."""
+        self.data_engine.reset_to_start()
+        self.trading_engine.reset()
+        if self._get_bots:
+            self._bots = self._get_bots(self.trading_engine, self.data_engine)
+            self._rebuild_bot_checkboxes()
+        self._equity_x.clear()
+        self._equity_y.clear()
+        self.equity_curve.setData([], [])
+        self.table_log.setRowCount(0)
+        self.text_bot_log.clear()
+        self._refresh_display_candles()
+        self._update_balance_label()
+        self._update_position_label()
+        self._update_stats()
+        self._update_live_trades_table(
+            self.data_engine.get_current_price() or 0.0
+        )
+        if self.data_engine.has_data():
+            self.btn_play.setEnabled(True)
+            self.btn_fast_forward.setEnabled(True)
+        self.setWindowTitle("BTC Futures Simülatörü")
+
+    def _on_simulate_different_dates(self) -> None:
+        """Tarih aralığı seçerek yeni veri yükler ve simülasyonu sıfırlar."""
+        from startup_dialog import StartupDialog
+        dialog = StartupDialog(self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+        start_date = dialog.get_start_date()
+        end_date = dialog.get_end_date()
+        csv_path = dialog.get_csv_path()
+        df_fetched = dialog.get_fetched_dataframe()
+        start_dt = dt.combine(start_date, dt.min.time())
+        end_dt = dt.now() if end_date == date.today() else dt.combine(end_date, dt.max.time())
+        if df_fetched is not None and not df_fetched.empty:
+            ok = self.data_engine.load_from_dataframe(
+                df_fetched, start_date=start_dt, end_date=end_dt
+            )
+            if not ok:
+                self.data_engine.load_from_dataframe(df_fetched)
+        elif csv_path and csv_path.strip():
+            import os
+            if os.path.isfile(csv_path):
+                ok = self.data_engine.load_csv(
+                    csv_path, start_date=start_dt, end_date=end_dt
+                )
+                if not ok:
+                    self.data_engine.load_csv(csv_path)
+        if not self.data_engine.has_data():
+            self.data_engine.generate_mock_data_for_range(start_dt, end_dt)
+        if not self.data_engine.has_data():
+            self.data_engine.generate_mock_data(800)
+        self.data_engine.reset_to_start()
+        self.trading_engine.reset()
+        if self._get_bots:
+            self._bots = self._get_bots(self.trading_engine, self.data_engine)
+            self._rebuild_bot_checkboxes()
+        self._equity_x.clear()
+        self._equity_y.clear()
+        self.equity_curve.setData([], [])
+        self.table_log.setRowCount(0)
+        self.text_bot_log.clear()
+        self._refresh_display_candles()
+        self._update_balance_label()
+        self._update_position_label()
+        self._update_stats()
+        if self.data_engine.has_data():
+            self.btn_play.setEnabled(True)
+            self.btn_fast_forward.setEnabled(True)
+        self.setWindowTitle("BTC Futures Simülatörü")
+        QMessageBox.information(
+            self,
+            "Bilgi",
+            f"Veri yüklendi: {start_date} - {end_date}. Simülasyonu Oynat veya Hızlı Test ile başlatın.",
+        )
 
     def _update_stats(self) -> None:
         s = self.trading_engine.get_stats()
