@@ -320,6 +320,39 @@ class DataEngine(QObject):
             return None
         return self._df_1m.iloc[: self._index].copy()
 
+    def get_completed_tf_candles(self, tf: str) -> Optional[pd.DataFrame]:
+        """
+        Verilen timeframe için sadece tamamlanmış mumları döner (son yarım kalmış bar hariç).
+        Botların EMA/RSI/ATR hesaplaması için kullanılır.
+        """
+        if self._df_1m is None or self._index <= 0 or tf not in TF_MAP:
+            return None
+        slice_1m = self._df_1m.iloc[: self._index].copy()
+        if slice_1m.empty or len(slice_1m) < 2:
+            return None
+        freq = TF_MAP.get(tf, "1min")
+        n_bars = TF_BARS.get(tf, 1)
+        if n_bars <= 0:
+            return None
+        try:
+            if not pd.api.types.is_datetime64_any_dtype(slice_1m.index):
+                slice_1m = slice_1m.copy()
+                slice_1m.index = pd.to_datetime(slice_1m.index, errors="coerce")
+                slice_1m = slice_1m[slice_1m.index.notna()]
+            res = slice_1m.resample(freq).agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }).dropna(how="all")
+            # Son bar tamamlanmamış olabilir (1m tick sayısı n_bars'ın katı değilse); son satırı at
+            if len(res) > 0 and len(slice_1m) % n_bars != 0:
+                res = res.iloc[:-1]
+            return res if not res.empty else None
+        except Exception:
+            return None
+
     def _on_tick(self) -> None:
         if self._df_1m is None or self._index >= len(self._df_1m):
             self._timer.stop()
