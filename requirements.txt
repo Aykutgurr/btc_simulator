@@ -9,3 +9,6 @@ xgboost>=2.0
 scikit-learn>=1.2
 joblib>=1.2
 torch>=2.0
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.7
