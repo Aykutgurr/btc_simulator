@@ -1,0 +1,27 @@
+{
+  "feature_names": [
+    "atr_rel",
+    "dist_swing_high_atr",
+    "dist_swing_low_atr",
+    "bos_up",
+    "bos_down",
+    "structure_bias",
+    "fvg_bull_gap_open",
+    "fvg_bear_gap_open",
+    "fvg_dist_below_atr",
+    "fvg_dist_above_atr",
+    "ob_dist_atr",
+    "sweep_high_recent",
+    "sweep_low_recent",
+    "mom_5_atr",
+    "vol_rel",
+    "ret_1",
+    "hl_range_atr"
+  ],
+  "timeframe": "15m",
+  "horizon": 20,
+  "k_atr": 2.0,
+  "csv": "C:\\Users\\aykut\\OneDrive\\Masa\u00fcst\u00fc\\btc_simulator\\btc_ohlcv.csv",
+  "n_samples": 1195,
+  "kind": "xgboost"
+}

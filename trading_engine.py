@@ -7,6 +7,8 @@ Tek açık pozisyon; likidasyon ve stop-loss kontrolü her fiyat güncellemesind
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+import numpy as np
+
 # Position: giriş fiyatı, yön, kaldıraç, marjin, likidasyon fiyatı, stop loss
 _POSITION_FIELDS = (
     "entry_price", "direction", "leverage", "margin_usdt",
@@ -84,7 +86,24 @@ class TradingEngine:
         return eq
 
     def get_stats(self) -> Dict[str, Any]:
-        """Win rate %, toplam PnL, max drawdown, toplam işlem sayısı (tüm zamanlar)."""
+        """Win rate %, toplam PnL, max drawdown, işlem sayısı, toplam getiri %, Sharpe (işlem bazlı yaklaşık)."""
+        total_return_pct = 0.0
+        if self._initial_usdt > 0:
+            total_return_pct = (self._balance_usdt - self._initial_usdt) / self._initial_usdt * 100.0
+
+        trade_pnls = []
+        for r in self._trade_history:
+            m = r.get("marjin", 0) or 0
+            if m > 0:
+                trade_pnls.append(r.get("pnl_net", r.get("pnl", 0)) / float(m))
+        sharpe_ratio = 0.0
+        if len(trade_pnls) >= 2:
+            arr = np.array(trade_pnls, dtype=float)
+            std = float(arr.std())
+            if std > 1e-12:
+                # İşlem bazlı getiri / volatilite; sqrt(n) ile ölçek (tam yıllık annualize değil)
+                sharpe_ratio = float(arr.mean() / std * np.sqrt(len(arr)))
+
         total = len(self._trade_history)
         if total == 0:
             return {
@@ -93,6 +112,8 @@ class TradingEngine:
                 "max_drawdown": 0.0,
                 "total_trades": 0,
                 "total_commission": 0.0,
+                "total_return_pct": total_return_pct,
+                "sharpe_ratio": sharpe_ratio,
             }
         wins = sum(1 for r in self._trade_history if r.get("pnl_net", r.get("pnl", 0)) > 0)
         total_pnl = sum(r.get("pnl_net", r.get("pnl", 0)) for r in self._trade_history)
@@ -113,6 +134,8 @@ class TradingEngine:
             "max_drawdown": max_dd,
             "total_trades": total,
             "total_commission": total_commission,
+            "total_return_pct": total_return_pct,
+            "sharpe_ratio": sharpe_ratio,
         }
 
     def open_long(

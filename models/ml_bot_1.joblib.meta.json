@@ -1,0 +1,25 @@
+{
+  "feature_names": [
+    "rsi_14",
+    "ema9_rel",
+    "ema21_rel",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "volume_ratio",
+    "ret_1",
+    "ret_2",
+    "ret_3",
+    "ret_4",
+    "ret_5",
+    "ema_cross"
+  ],
+  "timeframe": "5m",
+  "model_type": "xgboost",
+  "train_rows": 103402,
+  "test_rows": 25851,
+  "accuracy_test": 0.5145642334919346,
+  "log_loss_test": 0.6925217552690791,
+  "csv": "btc_ohlcv.csv",
+  "min_bars": 64
+}

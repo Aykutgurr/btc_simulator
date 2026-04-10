@@ -1,0 +1,8 @@
+{
+  "window": 64,
+  "channels": 5,
+  "n_classes": 3,
+  "kind": "torch_cnn",
+  "timeframe": "15m",
+  "horizon": 20
+}
