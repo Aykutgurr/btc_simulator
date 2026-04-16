@@ -475,6 +475,19 @@ class Session:
                     pass
             await self.ws_broadcast({"type": "tfClose", "timeframe": tf, "candle": candle_tf})
 
+        # 1m botlar: her tick bir 1m mum; yüksek TF kapanış listesinde 1m yok
+        for bot in self._bots:
+            name = getattr(bot, "name", None)
+            if not name:
+                continue
+            st = self._bot_state.get(name)
+            if not st or not st.enabled or st.timeframe != "1m":
+                continue
+            try:
+                bot.on_timeframe_candle("1m", candle)
+            except Exception:
+                pass
+
         # Stream candle
         await self.ws_broadcast({"type": "candle", "candle": candle, "index": index})
 
@@ -525,6 +538,97 @@ def _syntax_check(code: str) -> Optional[str]:
         return str(e)
 
 
+def _validate_generated_bot_code(code: str) -> Optional[str]:
+    """
+    Best-effort static validation to prevent common LLM failures:
+    - invented TradingEngine methods (e.g., trading_engine.ema, close(), etc.)
+    - forbidden imports / unsafe modules
+    """
+    try:
+        import ast
+    except Exception:
+        return None
+
+    # Keep in sync with trading_engine.TradingEngine public API used by bots.
+    allowed_engine_methods = {
+        "get_position",
+        "get_balance_usdt",
+        "get_available_balance",
+        "open_long",
+        "open_short",
+        "close_position",
+        "close_partial",
+        "update_position_parameters",
+        "log_message",
+    }
+
+    forbidden_import_roots = {
+        "os",
+        "sys",
+        "subprocess",
+        "socket",
+        "requests",
+        "http",
+        "urllib",
+        "pathlib",
+        "shutil",
+        "importlib",
+    }
+
+    try:
+        tree = ast.parse(code)
+    except Exception as e:
+        return f"AST parse failed: {e}"
+
+    bad_engine_calls = set()
+    bad_imports = set()
+    uses_eval_exec = False
+
+    for node in ast.walk(tree):
+        # imports
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = (alias.name or "").split(".")[0]
+                if root in forbidden_import_roots:
+                    bad_imports.add(root)
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0] if node.module else ""
+            if root in forbidden_import_roots:
+                bad_imports.add(root)
+
+        # eval/exec
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "__import__"}:
+                uses_eval_exec = True
+
+        # trading_engine.<method>(...)
+        if isinstance(node, ast.Attribute):
+            # match self.trading_engine.<attr>
+            v = node.value
+            if (
+                isinstance(v, ast.Attribute)
+                and isinstance(v.value, ast.Name)
+                and v.value.id == "self"
+                and v.attr == "trading_engine"
+            ):
+                attr = node.attr
+                if attr not in allowed_engine_methods:
+                    bad_engine_calls.add(attr)
+
+    problems = []
+    if bad_imports:
+        problems.append("Forbidden imports used: " + ", ".join(sorted(bad_imports)))
+    if uses_eval_exec:
+        problems.append("Forbidden builtins used: eval/exec/__import__")
+    if bad_engine_calls:
+        problems.append(
+            "Invented TradingEngine methods: "
+            + ", ".join(sorted(bad_engine_calls))
+            + f". Allowed: {', '.join(sorted(allowed_engine_methods))}"
+        )
+    return "; ".join(problems) if problems else None
+
+
 def _import_generated_bot(path: Path) -> Optional[Any]:
     try:
         import importlib.util
@@ -543,6 +647,76 @@ def _import_generated_bot(path: Path) -> Optional[Any]:
         return cls(SESSION.trading, SESSION.data)
     except Exception:
         return None
+
+
+async def _run_sandbox_report_for_path(
+    *,
+    bot_path: Path,
+    bot_id: str,
+    df_1m: "pd.DataFrame",
+    max_steps: int = 800,
+    timeout: int = 20,
+) -> Dict[str, Any]:
+    """
+    Run sandbox_runner.py and return its JSON report (or an error dict).
+    Intended as a quick smoke test during generation/repair.
+    """
+    tmpdir = Path(tempfile.gettempdir())
+    csv_path = tmpdir / f"btc_sim_sandbox_{bot_id}.csv"
+    try:
+        df_out = df_1m.reset_index().rename(columns={"datetime": "datetime"})
+        df_out.to_csv(csv_path, index=False, encoding="utf-8")
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to write sandbox csv: {e}"}
+
+    max_steps = max(100, min(5000, int(max_steps)))
+    timeout = max(5, min(180, int(timeout)))
+
+    runner_path = (Path(__file__).resolve().parent / "sandbox_runner.py").resolve()
+    cmd = [
+        "python",
+        str(runner_path),
+        "--bot-path",
+        str(bot_path),
+        "--csv-path",
+        str(csv_path),
+        "--max-steps",
+        str(max_steps),
+    ]
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(Path(__file__).resolve().parent),
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "Sandbox timeout"}
+    except Exception as e:
+        return {"ok": False, "error": f"Sandbox failed: {e}"}
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()[:4000]
+        return {"ok": False, "error": f"Sandbox error: {err}"}
+
+    try:
+        report = json.loads(proc.stdout)
+    except Exception:
+        report = {"ok": False, "error": "Invalid sandbox JSON output", "raw": (proc.stdout or "")[:2000]}
+    return report
+
+
+def _sandbox_has_bot_errors(report: Dict[str, Any]) -> Optional[str]:
+    try:
+        tail = report.get("logsTail") or []
+        for line in tail:
+            if isinstance(line, str) and "[bot_error]" in line:
+                return line
+    except Exception:
+        return None
+    return None
 
 
 def _relpath_to_repo(p: Path) -> str:
@@ -1199,6 +1373,16 @@ async def llm_bots_generate(body: LlmGenerateBotBody):
             code = None
             continue
 
+        val = _validate_generated_bot_code(code)
+        if val:
+            last_error = f"Validation error: {val}"
+            prompt = bot_repair_user_prompt(previous_code=code, error=last_error)
+            await SESSION.ws_broadcast(
+                {"type": "log", "message": f"[LLM] Repair attempt {attempt}: {last_error}"}
+            )
+            code = None
+            continue
+
         # ok
         last_error = None
         break
@@ -1220,14 +1404,33 @@ async def llm_bots_generate(body: LlmGenerateBotBody):
     except Exception as e:
         return {"ok": False, "error": f"Failed to write file: {e}"}
 
-    # Import and attach
+    # Import and attach (with runtime smoke-test repair if market data is loaded)
     bot_obj = _import_generated_bot(path)
-    if bot_obj is None:
-        # Try one more repair based on import failure
-        try:
+    for _attempt in range(2):  # initial + 1 repair (import/runtime)
+        if bot_obj is None:
             err = "Import failed (GeneratedBot missing or runtime error)."
-            await SESSION.ws_broadcast({"type": "log", "message": f"[LLM] Repair: {err}"})
-            repair_prompt = bot_repair_user_prompt(previous_code=code, error=err)
+        else:
+            err = None
+            try:
+                # Optional smoke test: if we have 1m data, run sandbox and repair on bot_error.
+                df_ok = SESSION.data._df_1m is not None and not SESSION.data._df_1m.empty  # type: ignore[attr-defined]
+                if df_ok:
+                    df_smoke = SESSION.data._df_1m.copy()  # type: ignore[attr-defined]
+                    report = await _run_sandbox_report_for_path(
+                        bot_path=path, bot_id=bot_id, df_1m=df_smoke, max_steps=800, timeout=20
+                    )
+                    bot_err = _sandbox_has_bot_errors(report) if isinstance(report, dict) else None
+                    if not report.get("ok", False) or bot_err:
+                        err = f"Sandbox runtime error: {bot_err or report.get('error', 'unknown')}"
+            except Exception as e:
+                err = f"Sandbox smoke test failed: {e}"
+
+        if not err:
+            break
+
+        await SESSION.ws_broadcast({"type": "log", "message": f"[LLM] Repair: {err}"})
+        try:
+            repair_prompt = bot_repair_user_prompt(previous_code=path.read_text(encoding='utf-8')[:6000], error=err)
             content2, _ = await asyncio.to_thread(
                 client.chat,
                 [{"role": "user", "content": repair_prompt}],
@@ -1235,14 +1438,18 @@ async def llm_bots_generate(body: LlmGenerateBotBody):
             )
             code2 = _extract_python_codeblock(content2) or ""
             syn2 = _syntax_check(code2) if code2 else "No code block"
-            if not syn2 and code2:
+            val2 = _validate_generated_bot_code(code2) if (not syn2 and code2) else None
+            if syn2 or val2 or not code2:
+                # keep prior error message; fall through
+                bot_obj = None
+            else:
                 path.write_text(code2 + "\n", encoding="utf-8")
                 bot_obj = _import_generated_bot(path)
         except Exception:
             bot_obj = None
 
     if bot_obj is None:
-        return {"ok": False, "error": "Generated code failed to import after repair.", "path": str(path)}
+        return {"ok": False, "error": "Generated code failed to import/run after repair.", "path": str(path)}
 
     SESSION._bots.append(bot_obj)
     name = getattr(bot_obj, "name", bot_name)

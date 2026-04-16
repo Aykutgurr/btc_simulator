@@ -1,0 +1,43 @@
+{
+  "New_bot_test_1775819319": {
+    "id": "New_bot_test_1775819319",
+    "name": "New bot test",
+    "timeframe": "5m",
+    "path": "bots\\generated\\New_bot_test_1775819319.py",
+    "enabled": false,
+    "createdAt": "2026-04-10T14:08:39",
+    "lastTest": null
+  },
+  "ema_bot_1775819448": {
+    "id": "ema_bot_1775819448",
+    "name": "ema bot",
+    "timeframe": "15m",
+    "path": "bots\\generated\\ema_bot_1775819448.py",
+    "enabled": false,
+    "createdAt": "2026-04-10T14:10:48",
+    "lastTest": null
+  },
+  "ema_bot_1m_1775819475": {
+    "id": "ema_bot_1m_1775819475",
+    "name": "ema bot_1m",
+    "timeframe": "1m",
+    "path": "bots\\generated\\ema_bot_1m_1775819475.py",
+    "enabled": true,
+    "createdAt": "2026-04-10T14:11:15",
+    "lastTest": {
+      "ok": true,
+      "steps": 5000,
+      "stats": {
+        "win_rate_pct": 0.0,
+        "total_pnl": 0.0,
+        "max_drawdown": 0.0,
+        "total_trades": 0,
+        "total_commission": 0.0,
+        "total_return_pct": 0.0,
+        "sharpe_ratio": 0.0
+      },
+      "tradeHistorySample": [],
+      "logsTail": []
+    }
+  }
+}

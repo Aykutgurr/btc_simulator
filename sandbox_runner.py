@@ -155,10 +155,16 @@ def main() -> int:
         if closed and closed.get("record"):
             # no-op, record already stored
             pass
-        # bots on tf close
+        # bots on tf close (5m/15m/1h/4h)
         for tf, candle_tf in tf_closes:
             try:
                 bot.on_timeframe_candle(tf, candle_tf)
+            except Exception as e:
+                logs.append(f"[bot_error] {e}")
+        # 1m: her adımda bir 1m mum kapanır; TF_BARS'ta 1m yoktu, aksi halde 1m botlar hiç çağrılmazdı
+        if getattr(bot, "timeframe", None) == "1m":
+            try:
+                bot.on_timeframe_candle("1m", candle)
             except Exception as e:
                 logs.append(f"[bot_error] {e}")
         for m in engine.get_and_clear_log_messages():
