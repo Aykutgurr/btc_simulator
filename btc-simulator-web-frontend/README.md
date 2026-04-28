@@ -41,14 +41,14 @@ Backend henüz yoksa mock mode ile UI’yı test edebilirsiniz.
 UI icinden yeni strateji botu uretip sandbox icinde test edebilirsiniz.
 
 - **Gereksinim**: Ollama calisiyor olmali (varsayilan `http://localhost:11434`)
-- **Model**: `llama3.2:3b`
+- **Model**: `qwen2.5:7b-instruct`
 
 ### Adimlar
 1) Backend: `python ..\\web_api.py`
 2) Ollama:
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull qwen2.5:7b-instruct
 ollama serve
 ```
 

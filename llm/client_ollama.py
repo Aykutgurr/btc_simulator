@@ -20,7 +20,7 @@ class OllamaClient:
 
     def __init__(self):
         self.base_url = _env("LLM_BASE_URL", "http://localhost:11434").rstrip("/")
-        self.model = _env("LLM_MODEL", "llama3.2:3b")
+        self.model = _env("LLM_MODEL", "qwen2.5:7b-instruct")
         self.temperature = float(_env("LLM_TEMPERATURE", "0.2"))
         self.max_tokens = int(_env("LLM_MAX_TOKENS", "2000"))
 
