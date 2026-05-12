@@ -32,8 +32,10 @@ from PyQt5.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QTextEdit,
+    QLineEdit,
+    QPlainTextEdit,
 )
-from PyQt5.QtCore import Qt, QPointF, QRectF
+from PyQt5.QtCore import Qt, QPointF, QRectF, QThread, pyqtSignal
 from PyQt5.QtGui import QPainter, QPicture
 
 from data_engine import DataEngine
@@ -114,6 +116,63 @@ class CandlestickItem(pg.GraphicsObject):
         return QRectF(self.picture.boundingRect())
 
 
+class LlmBotGenerateThread(QThread):
+    """Ollama üretimini UI thread'inden ayırır."""
+
+    finished_ok = pyqtSignal(dict)
+    finished_err = pyqtSignal(str)
+
+    def __init__(
+        self,
+        trading_engine: Any,
+        data_engine: Any,
+        bot_name: str,
+        timeframe: str,
+        description: str,
+        notes: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._trading_engine = trading_engine
+        self._data_engine = data_engine
+        self._bot_name = bot_name
+        self._timeframe = timeframe
+        self._description = description
+        self._notes = notes or ""
+
+    def run(self) -> None:
+        from llm.generated_bot_pipeline import generate_and_register_bot
+
+        constraints = None
+        if self._notes.strip():
+            constraints = {"notes": self._notes.strip()}
+        df = None
+        if self._data_engine is not None:
+            try:
+                df = self._data_engine.get_all_1m_for_indicators()
+                if df is None or df.empty:
+                    df = None
+            except Exception:
+                df = None
+        try:
+            res = generate_and_register_bot(
+                self._trading_engine,
+                self._data_engine,
+                bot_name=self._bot_name,
+                timeframe=self._timeframe,
+                description=self._description,
+                constraints=constraints,
+                df_1m_for_sandbox=df,
+            )
+        except Exception as e:
+            self.finished_err.emit(str(e))
+            return
+        if res.get("ok"):
+            self.finished_ok.emit(res)
+        else:
+            self.finished_err.emit(res.get("error") or "Üretim başarısız")
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -140,6 +199,7 @@ class MainWindow(QMainWindow):
         self._equity_x: List[float] = []
         self._equity_y: List[float] = []
         self._fast_forward_active = False
+        self._llm_worker: Optional[LlmBotGenerateThread] = None
 
         # Sol toolbar
         left_toolbar = QFrame()
@@ -404,6 +464,52 @@ class MainWindow(QMainWindow):
         tab2_layout.addWidget(self.text_bot_log)
         tab2_layout.addStretch()
         self.tabs.addTab(tab2, "Botlar & İstatistikler")
+
+        # ========== LLM ile Bot Oluşturma ==========
+        tab_llm = QWidget()
+        tab_llm_layout = QVBoxLayout(tab_llm)
+        tab_llm_layout.addWidget(
+            QLabel(
+                "Yerel Ollama kullanılır (ortam: LLM_BASE_URL, LLM_MODEL). Üretilen Python "
+                "dosyası çalıştırılır; yalnızca güvendiğiniz modelleri kullanın."
+            )
+        )
+        tab_llm_layout.addWidget(QLabel("Bot adı:"))
+        self.edit_llm_bot_name = QLineEdit()
+        self.edit_llm_bot_name.setPlaceholderText("Örn: EMA_Cross_15m")
+        tab_llm_layout.addWidget(self.edit_llm_bot_name)
+        row_llm_tf = QHBoxLayout()
+        row_llm_tf.addWidget(QLabel("Timeframe:"))
+        self.combo_llm_tf = QComboBox()
+        self.combo_llm_tf.addItems(["1m", "5m", "15m", "1h", "4h"])
+        self.combo_llm_tf.setCurrentText("15m")
+        row_llm_tf.addWidget(self.combo_llm_tf)
+        row_llm_tf.addStretch()
+        tab_llm_layout.addLayout(row_llm_tf)
+        tab_llm_layout.addWidget(QLabel("Strateji açıklaması:"))
+        self.edit_llm_description = QPlainTextEdit()
+        self.edit_llm_description.setPlaceholderText(
+            "Stratejinizi düz dilde yazın (ör. ne zaman long/short, hangi koşullarda çıkış…). "
+            "Teknik API yazmanız gerekmez."
+        )
+        self.edit_llm_description.setMaximumHeight(140)
+        tab_llm_layout.addWidget(self.edit_llm_description)
+        tab_llm_layout.addWidget(QLabel("Ek notlar (opsiyonel):"))
+        self.edit_llm_notes = QPlainTextEdit()
+        self.edit_llm_notes.setMaximumHeight(70)
+        tab_llm_layout.addWidget(self.edit_llm_notes)
+        self.btn_llm_generate = QPushButton("Ollama ile üret")
+        self.btn_llm_generate.clicked.connect(self._on_llm_generate_clicked)
+        tab_llm_layout.addWidget(self.btn_llm_generate)
+        self.label_llm_status = QLabel("")
+        tab_llm_layout.addWidget(self.label_llm_status)
+        tab_llm_layout.addWidget(QLabel("Kod önizleme:"))
+        self.text_llm_preview = QPlainTextEdit()
+        self.text_llm_preview.setReadOnly(True)
+        self.text_llm_preview.setMaximumHeight(220)
+        tab_llm_layout.addWidget(self.text_llm_preview)
+        tab_llm_layout.addStretch()
+        self.tabs.addTab(tab_llm, "LLM ile Bot")
 
         # ========== SEKME 3: İşlem Logu ==========
         tab3 = QWidget()
@@ -675,6 +781,68 @@ class MainWindow(QMainWindow):
         if not self._bots:
             self._bot_layout.insertWidget(0, QLabel("Tanımlı bot yok."))
         self._bot_layout.addStretch()
+
+    def _reload_bots_from_factory(self) -> None:
+        if self._get_bots:
+            self._bots = self._get_bots(self.trading_engine, self.data_engine)
+            self._rebuild_bot_checkboxes()
+
+    def _on_llm_generate_clicked(self) -> None:
+        if self._llm_worker is not None and self._llm_worker.isRunning():
+            QMessageBox.warning(self, "Bekleyin", "Üretim devam ediyor.")
+            return
+        name = self.edit_llm_bot_name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Eksik", "Bot adı girin.")
+            return
+        desc = self.edit_llm_description.toPlainText().strip()
+        if not desc:
+            QMessageBox.warning(self, "Eksik", "Strateji açıklaması girin.")
+            return
+        self.btn_llm_generate.setEnabled(False)
+        self.label_llm_status.setText("Ollama ile üretiliyor…")
+        self.text_llm_preview.clear()
+        tf = self.combo_llm_tf.currentText()
+        notes = self.edit_llm_notes.toPlainText()
+        self._llm_worker = LlmBotGenerateThread(
+            self.trading_engine,
+            self.data_engine,
+            name,
+            tf,
+            desc,
+            notes,
+            self,
+        )
+        self._llm_worker.finished_ok.connect(self._on_llm_worker_finished_ok)
+        self._llm_worker.finished_err.connect(self._on_llm_worker_finished_err)
+        self._llm_worker.finished.connect(self._on_llm_worker_thread_finished)
+        self._llm_worker.start()
+
+    def _on_llm_worker_finished_ok(self, res: Dict[str, Any]) -> None:
+        preview = (res.get("code") or "")[:8000]
+        self.text_llm_preview.setPlainText(preview)
+        self._reload_bots_from_factory()
+        try:
+            self.trading_engine.log_message(
+                f"[LLM] Bot üretildi: {res.get('name')} ({res.get('timeframe')})"
+            )
+        except Exception:
+            pass
+        QMessageBox.information(
+            self,
+            "Tamam",
+            f"Bot kaydedildi: {res.get('name')}\nTimeframe: {res.get('timeframe')}\n"
+            "Bot Yöneticisi sekmesinde işaretleyerek kullanın.",
+        )
+
+    def _on_llm_worker_finished_err(self, err: str) -> None:
+        self.text_llm_preview.setPlainText(err)
+        QMessageBox.critical(self, "LLM hatası", err[:6000])
+
+    def _on_llm_worker_thread_finished(self) -> None:
+        self.btn_llm_generate.setEnabled(True)
+        self.label_llm_status.setText("")
+        self._llm_worker = None
 
     def _on_restart_simulation(self) -> None:
         """Simülasyonu başa alır; motor ve botlar sıfırlanır."""

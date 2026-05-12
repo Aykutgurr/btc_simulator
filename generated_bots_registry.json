@@ -39,5 +39,14 @@
       "tradeHistorySample": [],
       "logsTail": []
     }
+  },
+  "LLM_test_bot_1778602862": {
+    "id": "LLM_test_bot_1778602862",
+    "name": "LLM test bot",
+    "timeframe": "15m",
+    "path": "bots\\generated\\LLM_test_bot_1778602862.py",
+    "enabled": false,
+    "createdAt": "2026-05-12T19:23:35",
+    "lastTest": null
   }
 }

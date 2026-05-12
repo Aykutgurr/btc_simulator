@@ -75,7 +75,7 @@ interface AppState {
 interface AppActions {
   // Init
   initialize(): Promise<void>;
-  loadSession(params: { source: 'mock' | 'csv' | 'yfinance' | 'ccxt'; startDate?: string; endDate?: string; csvPath?: string }): Promise<{ ok: boolean }>;
+  loadSession(params: { source: 'csv' | 'yfinance'; startDate?: string; endDate?: string; csvPath?: string }): Promise<{ ok: boolean }>;
 
   // UI
   setActiveTab(tab: TabId): void;

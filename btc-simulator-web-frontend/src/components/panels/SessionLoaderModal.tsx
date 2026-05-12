@@ -7,7 +7,12 @@ import { Badge } from '../ui/Badge';
 import { useAppStore } from '../../store/useAppStore';
 import { clsn } from '../../utils/format';
 
-type Source = 'mock' | 'csv' | 'yfinance' | 'ccxt';
+type Source = 'csv' | 'yfinance';
+
+const SOURCE_OPTIONS: { value: Source; label: string }[] = [
+  { value: 'csv', label: 'CSV' },
+  { value: 'yfinance', label: 'YFinance' },
+];
 
 function isoDate(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -24,10 +29,8 @@ export function SessionLoaderModal({ open, onClose }: { open: boolean; onClose: 
 
   const canCsvPath = source === 'csv';
   const title = useMemo(() => {
-    if (source === 'mock') return 'Mock veri';
     if (source === 'csv') return 'CSV';
-    if (source === 'yfinance') return 'yfinance (BTC-USD)';
-    return 'ccxt (Binance BTC/USDT)';
+    return 'yfinance (BTC-USD)';
   }, [source]);
 
   if (!open) return null;
@@ -78,19 +81,19 @@ export function SessionLoaderModal({ open, onClose }: { open: boolean; onClose: 
               <Badge variant="blue">{title}</Badge>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-              {(['csv', 'yfinance', 'ccxt', 'mock'] as Source[]).map((s) => (
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {SOURCE_OPTIONS.map(({ value, label }) => (
                 <button
-                  key={s}
-                  onClick={() => setSource(s)}
+                  key={value}
+                  onClick={() => setSource(value)}
                   className={clsn(
                     'px-3 py-2 rounded-lg border text-xs font-semibold transition-colors',
-                    source === s
+                    source === value
                       ? 'bg-sky-600/20 text-sky-300 border-sky-600/40'
                       : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800 hover:text-zinc-200'
                   )}
                 >
-                  {s.toUpperCase()}
+                  {label}
                 </button>
               ))}
             </div>

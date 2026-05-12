@@ -5,6 +5,8 @@ Bot modülleri. get_bots() ile kayıtlı bot listesi döner.
 
 from typing import List, Any
 
+from llm.generated_bot_pipeline import instantiate_registered_bots
+
 from .test_bot import TestBot15m
 from .test_bot_v2 import TestBotV2
 from .ai_bot_mean_reversion import AIBot_MeanReversion
@@ -34,4 +36,5 @@ def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
         bots_list.append(ICT_ML_Bot(trading_engine, data_engine))
         bots_list.append(ML_bot_1(trading_engine, data_engine))
         bots_list.append(MSB_MTF_Bot(trading_engine, data_engine))
+    bots_list.extend(instantiate_registered_bots(trading_engine, data_engine))
     return bots_list
