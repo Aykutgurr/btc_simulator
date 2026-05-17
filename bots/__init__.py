@@ -23,6 +23,9 @@ from .msb_mtf_bot import MSB_MTF_Bot
 from .super_bot import SuperBot
 from .super_bot_v2 import SuperBotV2
 from .super_bot_v3 import SuperBotV3
+from .super_bot_pro import SuperBotPro
+from .super_bot_promax import SuperBotProMax
+from .claude_bot import ClaudeBot
 
 
 def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
@@ -46,5 +49,8 @@ def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
         bots_list.append(SuperBot(trading_engine, data_engine))
         bots_list.append(SuperBotV2(trading_engine, data_engine))
         bots_list.append(SuperBotV3(trading_engine, data_engine))
+        bots_list.append(SuperBotPro(trading_engine, data_engine))
+        bots_list.append(SuperBotProMax(trading_engine, data_engine))
+        bots_list.append(ClaudeBot(trading_engine, data_engine))
     bots_list.extend(instantiate_registered_bots(trading_engine, data_engine))
     return bots_list
