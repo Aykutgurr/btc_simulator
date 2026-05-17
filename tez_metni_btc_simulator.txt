@@ -1,0 +1,379 @@
+================================================================================
+LİSANS BİTİRME PROJESİ RAPORU
+================================================================================
+PROJE BAŞLIĞI
+Bitcoin Vadeli İşlem Simülatörü: Olay Güdümlü Veri Akışı, Strateji Botları
+ve Makine Öğrenmesi ile Geliştirilmiş Yedek Test Ortamı
+
+Proje Ekibi
+Öğrenci Adı Soyadı     : ..................................................
+Öğrenci Numarası       : ..................................................
+Proje Danışmanı        : ..................................................
+Danışman Unvanı        : ..................................................
+Bölüm                  : ..................................................
+Ders Kodu ve Ders Adı  : ..................................................
+Teslim Tarihi          : ..................................................
+
+--------------------------------------------------------------------------------
+ÖZET
+--------------------------------------------------------------------------------
+Bu çalışma, kripto para piyasalarında vadeli (futures) işlem davranışının geçmiş
+fiyat verisi üzerinde güvenli ve tekrarlanabilir biçimde incelenmesine olanak
+sağlayan bir yazılım sisteminin tasarımını ve gerçekleştirilmesini sunmaktadır.
+Sistem; dakikalık OHLCV zaman serisini yöneten bir veri motoru, izole marjin ve
+tek açık pozisyon varsayımlarıyla çalışan bir işlem motoru, tamamlanmış mum
+kapanışları üzerinden sinyal üreten strateji botları ve isteğe bağlı olarak
+makine öğrenmesi (sınıflandırma) ile doğal dil tabanlı bot kodu üretim hattından
+oluşmaktadır. Masaüstü (PyQt5) ve web (React + FastAPI) olmak üzere iki sunum
+katmanı sunulmuş; böylece araştırmacı veya uygulayıcı aynı çekirdek mantığı
+farklı arayüzlerden deneyebilmektedir. Proje kapsamında özellikle BTC/USD
+senaryolarında gösterge tabanlı özellik vektörleri, kronolojik eğitim-test
+ayırımı ve olasılık eşiğiyle çalışan ML sınıflandırma botlarının entegrasyonu
+ele alınmıştır. Sistem, canlı borsaya sürekli emir gönderen bir aracı kurum
+yazılımı değil; look-ahead bias’i azaltacak şekilde tasarlanmış yerel bir
+simülasyon ve eğitim ortamıdır.
+
+Anahtar Kelimeler: Bitcoin, vadeli işlem simülasyonu, geri test, PyQt5,
+FastAPI, makine öğrenmesi, olay güdümlü mimari
+
+--------------------------------------------------------------------------------
+ABSTRACT
+--------------------------------------------------------------------------------
+This undergraduate project report presents the design and implementation of a
+software system for reproducible backtesting of cryptocurrency futures-style
+trading on historical OHLCV data. The solution combines an event-driven data
+engine (one-minute bars with multi-timeframe aggregation), an isolated-margin
+trading engine with a single open position, commission and stop/liquidation
+handling, and a pluggable strategy layer implemented as Python bots. Optional
+components include scikit-learn / XGBoost classification pipelines and a local
+LLM-assisted code generation workflow for experimental strategies. The same
+core logic is exposed through a PyQt5 desktop application and a React + FastAPI
+web stack. The work emphasizes leakage-aware feature engineering for short-horizon
+labels and separates offline training from online inference during simulation.
+
+Keywords: Bitcoin, futures simulation, backtesting, PyQt5, FastAPI,
+machine learning, event-driven architecture
+
+--------------------------------------------------------------------------------
+TEŞEKKÜR
+--------------------------------------------------------------------------------
+Projenin planlanması ve değerlendirilmesinde destek olan danışmanıma teşekkür
+ederim. Açık kaynak kütüphane geliştiricileri ve topluluk belgeleri, özellikle
+pandas, scikit-learn ve FastAPI ekosistemleri, uygulamanın hızlı prototiplenmesine
+katkı sağlamıştır.
+
+================================================================================
+İÇİNDEKİLER (ÖNERİLEN RAPOR YAPISI)
+================================================================================
+1. Giriş
+   1.1. Problem Tanımı
+   1.2. Proje Amaçları
+   1.3. Proje Kapsamı
+   1.4. Raporun Organizasyonu
+2. Genel Kavramlar
+   2.1. Alan Tanımı
+   2.2. Kullanılan Teknolojiler
+   2.3. Temel Kavramlar
+3. Kaynak Araştırması (İlgili Çalışmalar)
+4. Yazılım Süreç Modeli
+5. Gereksinim Analizi
+6. Sistem Modellemesi
+7. Sistem Mimarisi ve Tasarımı
+   7.1. Sistem Mimarisi
+   7.2. Yapısal Modeller
+   7.2.1. Strateji Botlarının Sisteme Entegrasyonu
+   7.2.2. Kalıtım ve Genişletilebilirlik
+   7.2.3. Bileşim ve Kullanım İlişkileri
+   7.3. Davranışsal Modeller
+   7.3.1. Olay Güdümlü Model
+   7.3.2. İşlem ve Simülasyon Yaşam Döngüsü
+8. Sistem Gerçekleştirme
+9. MVP ve Özellikler
+10. Test ve Değerlendirme
+11. Sonuçlar ve Tartışma
+12. Sonuç ve Gelecek Çalışmalar
+13. Ekler
+
+================================================================================
+1. GİRİŞ
+================================================================================
+
+1.1. Problem Tanımı
+Kripto para vadeli piyasaları yüksek oynaklık ve kaldıraç etkisi nedeniyle
+risk yönetimi ve strateji doğrulamasını zorunlu kılmaktadır. Stratejilerin yalnızca
+sezgisel veya grafik üzerinde gözlemlenmesi; komisyon, likidasyon, marjin
+bloke etkisi ve zaman dilimi uyumsuzlukları gibi faktörleri sistematik biçimde
+hesaba katmayı güçleştirmektedir. Ayrıca makine öğrenmesi tabanlı yaklaşımlarda
+gelecek bilgisinin yanlışlıkla özelliklere sızması (look-ahead bias) yanlış
+performans algısına yol açabilmektedir. Bu proje, gerçek piyasaya emir göndermeden
+önce stratejilerin tarihsel veri üzerinde ölçülebilir şekilde denenmesi ve
+ML modellerinin eğitim ile çıkarım aşamalarının açıkça ayrılması ihtiyacını
+ele almaktadır.
+
+1.2. Proje Amaçları
+Bu çalışmanın temel amaçları şunlardır:
+(i) Dakikalık veri akışından çoklu zaman dilimi (örneğin 5 dakika) mumları
+    üreten ve oynatılabilen bir veri motoru geliştirmek;
+(ii) İzole marjin, tek açık pozisyon, stop-loss, take-profit, likidasyon ve
+     komisyon modeli içeren bir işlem motoru sunmak;
+(iii) Kural tabanlı ve makine öğrenmesi tabanlı strateji botlarını aynı motor
+      API’si üzerinden çalıştırılabilir kılmak;
+(iv) İsteğe bağlı yerel büyük dil modeli (Ollama) ile deney stratejisi kodu
+     üretimini güvenli doğrulama adımlarıyla desteklemek;
+(v) Masaüstü ve web istemcisi ile kullanılabilirliği artırmak.
+
+1.3. Proje Kapsamı
+Kapsam; geçmiş veya uygulama içi indirilen OHLCV verisi ile sınırlı simülasyon,
+grafik ve istatistik gösterimi, bot seçimi ve loglanması, ML modelinin dosyadan
+yüklenmesi ve offline eğitim scriptleri ile desteklenmesidir. Gerçek borsada
+otonom emir yürütme, üretim düzeyinde yüksek erişilebilirlik (HA) mimarisi,
+kurumsal risk uyumluluk paketleri ve çoklu hesap yönetimi bu raporun dışında
+bırakılmıştır. Web ve masaüstü arayüzleri aynı iş mantığını farklı sunum
+katmanlarıyla erişilebilir kılar; ancak her iki ortam da yerel çalışma ve
+araştırma odaklıdır.
+
+1.4. Raporun Organizasyonu
+İkinci bölümde alan ve temel kavramlar özetlenmektedir. Üçüncü bölümde ilgili
+yaklaşımlar literatür ve ürün düzeyinde kısaca konumlandırılmaktadır. Dördüncü
+ve beşinci bölümlerde süreç modeli ile gereksinimler yer almaktadır. Altıncı ve
+yedinci bölümlerde modelleme ve mimari açıklanmakta; sekizinci ve dokuzuncu
+bölümlerde gerçekleştirme ile MVP özellikleri anlatılmaktadır. Onuncu ve on
+birinci bölümlerde test ve tartışma; on ikinci bölümde sonuç ve gelecek işler
+özetlenmektedir.
+
+================================================================================
+2. GENEL KAVRAMLAR
+================================================================================
+
+2.1. Alan Tanımı
+Alan; finansal zaman serisi analizi, teknik göstergeler, geri test (backtest),
+vadeli işlem riski ve yazılım mühendisliğinin kesişimidir. Sistem, yatırım tavsiyesi
+üretmekten ziyade araştırma ve eğitim amaçlı deneysel bir ortam olarak
+konumlandırılmalıdır.
+
+2.2. Kullanılan Teknolojiler
+- Programlama ve veri: Python, NumPy, Pandas
+- Masaüstü arayüz: PyQt5, PyQtGraph (mum ve gösterge grafikleri)
+- Web arayüzü: React, Vite, Tailwind; grafik için TradingView Lightweight Charts
+- Sunucu API: FastAPI, WebSocket (web_api.py)
+- Teknik analiz yardımları: pandas-ta (ortamda kurulu ise)
+- Makine öğrenmesi: scikit-learn (RandomForest), XGBoost, joblib
+- İsteğe bağlı veri indirme: ccxt (örnek olarak Binance geçmiş verisi)
+- Yerel LLM: Ollama istemcisi ve üretim hattı (llm/)
+
+2.3. Temel Kavramlar
+OHLCV: Açılış, en yüksek, en düşük, kapanış ve hacim bilgisini içeren mum
+yapısıdır. İzole marjin: Pozisyon için ayrılan marjinin yalnızca o pozisyonla
+sınırlı risk taşımasıdır. Geri test: Stratejinin geçmiş veri üzerinde yeniden
+oynatılmasıdır. Look-ahead bias: Etiket veya gelecek fiyat bilgisinin geçmişe
+ait özellik hesaplarına yanlışlıkla karışmasıdır. Olay güdümlü simülasyon: Zaman
+ilerlemesinin ayrık olaylar (ör. yeni mum, mum kapanışı) ile yönetilmesidir.
+
+================================================================================
+3. KAYNAK ARAŞTIRMASI (İLGİLİ ÇALIŞMALAR)
+================================================================================
+Ticari platformlar (TradingView, MetaTrader vb.) geniş kullanıcı tabanına
+sahiptir; ancak öğrenci projesi düzeyinde tam denetim, özelleştirilmiş risk
+motoru ve yerel LLM ile kod üretim hattı bir arada her zaman bulunmayabilir.
+Akademik literatürde kripto ve yüksek frekans benzeri veri kümelerinde sınıflandırma
+ve gradyan tabanlı yöntemler sıkça incelenmektedir. Bu proje; açık kaynak
+bileşenlerle uçtan uca bir simülasyon hattı kurarak, eğitim ve deney için
+şeffaf bir kod tabanı sunmayı hedeflemektedir. Karşılaştırmalı değerlendirmede
+“ürün olgunluğu / özellik zenginliği” ile “öğrenilebilirlik ve şeffaflık”
+boyutları birlikte ele alınabilir.
+
+================================================================================
+4. YAZILIM SÜREÇ MODELİ
+================================================================================
+Proje; kısa iterasyonlarla modül ekleme (veri motoru, işlem motoru, botlar,
+web API) şeklinde yürütülebilir. Şablonda örneklenen Scrum yaklaşımı bu bağlamda
+isteğe bağlıdır; raporda “artımlı geliştirme ve çalışan yazılım önceliği”
+ifadesi kullanılabilir. Sprint benzeri planlama; veri yükleme, motor doğrulama,
+bot entegrasyonu, ML eğitim scripti ve web senkronizasyonu gibi iş paketlerine
+bölünebilir.
+
+================================================================================
+5. GEREKSİNİM ANALİZİ
+================================================================================
+
+5.1. Paydaşlar
+Simülatörü kullanan araştırmacı veya geliştirici; danışman; ileride aynı kodu
+genişletmek isteyen ekip üyeleri paydaş olarak düşünülebilir.
+
+5.2. Kullanıcı Gereksinimleri
+5.2.1. Fonksiyonel Gereksinimler (Özet)
+- CSV veya uygulama içi veri kaynağı ile OHLCV yükleme ve tarih aralığı seçimi
+- Zaman dilimi seçimi ve mumların oynatılması (hız ön ayarları)
+- İşlem motoru ile long/short açma, kapatma; stop ve take-profit takibi
+- Birden fazla hazır bot ve kullanıcı tarafından seçilebilir etkinleştirme
+- ML botlarında diskten model yükleme ve mum kapanışında çıkarım
+- Web tarafında REST ve WebSocket ile oturum durumu izleme (web_api.py)
+- İsteğe bağlı Ollama ile bot kodu üretimi ve güvenli doğrulama / kayıt
+
+5.2.2. Fonksiyonel Olmayan Gereksinimler
+- Tekrarlanabilir simülasyon (aynı veri ve parametrelerle tutarlı sonuç)
+- Modüler Python yapısı ve okunabilirlik
+- Yerel çalıştırma ile dış API maliyetini sınırlama (LLM için Ollama tercihi)
+
+5.3. Sistem Özellikleri
+Çoklu zaman dilimi desteği; tek pozisyon kuralı; komisyon modeli; bot logları
+ve işlem geçmişi; ML eğitim scriptleri (ör. train_ml_classify_5m.py); masaüstü
+ve web çift ön uç.
+
+================================================================================
+6. SİSTEM MODELLEMESİ
+================================================================================
+
+6.1. Bağlam Diyagramı (Metinsel)
+Kullanıcı, masaüstü (MainWindow) veya web istemcisi üzerinden simülasyonu
+başlatır. Veri motoru (DataEngine / WebDataEngine) 1 dakikalık seriyi ilerletir
+ve seçilen zaman diliminde mum kapanışı olayını yayınlar. İşlem motoru
+(TradingEngine) her fiyat güncellemesinde likidasyon ve stop/take-profit
+koşullarını değerlendirir. Strateji botları, yalnızca ilgili zaman diliminde ve
+kullanıcı etkinleştirdiyse tetiklenerek motor API’sini çağırır. Harici kaynak
+isteğe bağlı olarak geçmiş veri indirmek için kullanılır; temel akış yerel
+simülasyondur.
+
+6.2. Kullanım Durumları (Örnekler)
+- Veri yükle ve tarih filtresi uygula
+- Simülasyonu başlat, durdur, hızı değiştir
+- Bot seç ve strateji loglarını izle
+- ML modeli eğit ve çıktıyı models/ altına kaydet; simülasyonda botu çalıştır
+- Web üzerinden oturum aç ve grafiği izle
+
+6.3. Sıralama (Sequence) Özeti
+1m tik → TradingEngine.check_price → grafik güncelleme → (koşul sağlanırsa)
+seçilen timeframe için timeframe_candle_completed → ilgili botların
+on_timeframe_candle çağrısı → open_long / open_short / close_position vb.
+
+================================================================================
+7. SİSTEM MİMARİSİ VE TASARIMI
+================================================================================
+
+7.1. Sistem Mimarisi
+Dört ana katman önerilir:
+(1) Veri katmanı: 1m OHLCV saklama, resample ile 5m/15m/1h/4h tamamlanmış mumlar,
+    oynatma hızı.
+(2) İşlem katmanı: bakiye, tek pozisyon, kaldıraç, komisyon, SL/TP, likidasyon,
+    kısmi kapatma desteği (close_partial).
+(3) Strateji katmanı: Python sınıfları; ML botlarında joblib ile model yükleme;
+    LLM hattında üretilen kodun doğrulanıp bots/generated altına yazılması.
+(4) Sunum katmanı: ui_components.py (PyQtGraph) ve React istemcisi + FastAPI.
+
+7.2. Yapısal Modeller
+
+7.2.1. Strateji Botlarının Sisteme Entegrasyonu
+Botlar, kurucu metotta TradingEngine ve gerektiğinde DataEngine örnekleriyle
+oluşturulur (bağımlılık enjeksiyonu). Ana pencere, DataEngine.timeframe_candle_completed
+sinyaline bağlanır. Her olayda botun timeframe özniteliği ile seçilen çözünürlük
+eşleşiyorsa ve kullanıcı arayüzden botu işaretlediyse on_timeframe_candle
+çağrılır. ML tabanlı botlar (ör. MLClassify5m, MLClassify5mv2), tamamlanmış
+5 dakikalık mum DataFrame’ini get_completed_tf_candles("5m") ile alır; son satır
+için özellik vektörü üretir ve predict_proba ile yön olasılıklarını okur.
+İşlem motoru tek pozisyon kuralına sahip olduğundan, ters yönde sinyal geldiğinde
+önce close_position, ardından yeni yönde açılış yapılır.
+
+7.2.2. Kalıtım ve Genişletilebilirlik
+Kod tabanında zorunlu ortak soyut BaseStrategy sınıfı bulunmak zorunda değildir.
+Genişletilebilirlik; yeni bir bot sınıfının aynı motor API’sine uyması ve
+bots/__init__.py içindeki get_bots listesine eklenmesiyle sağlanır. LLM ile
+üretilen botlar ek olarak generated_bot_pipeline aracılığıyla kayıt defterine
+işlenir ve çalışma anında instantiate_registered_bots ile listeye katılır.
+
+7.2.3. Bileşim ve Kullanım İlişkileri
+MainWindow, çalışma süresince DataEngine ve TradingEngine referanslarına sıkı
+bağımlıdır (bileşim). İşlem geçmişi listesi ve bot örnekleri motoru paylaşır;
+botlar birbirinden bağımsız oluşturulabilir (kümeleme benzeri ortak hizmet
+kullanımı).
+
+7.3. Davranışsal Modeller
+
+7.3.1. Olay Güdümlü Model
+Masaüstünde PyQt sinyal/slot yapısı ve QTimer ile ayrık zaman ilerlemesi sağlanır.
+Web tarafında zamanlayıcı ve WebSocket mesajları benzer rol oynar.
+
+7.3.2. İşlem ve Simülasyon Yaşam Döngüsü
+Durumlar kabaca: (i) veri yok / beklemede, (ii) akış çalışıyor, (iii) pozisyon yok
+veya açık, (iv) kapanış nedeni (stop, TP, likidasyon, manuel). Simülatör çekirdeği
+“emir gönderildi” gibi borsa omurga durumlarını varsaymaz; fiyat güncellemesi
+olayları üzerinden ilerler.
+
+================================================================================
+8. SİSTEM GERÇEKLEŞTİRME
+================================================================================
+
+8.1. Geliştirme Ortamı
+Python sanal ortamı; requirements.txt ile bağımlılıklar; masaüstü için PyQt5;
+web için Node.js ve npm; isteğe bağlı Ollama sunucusu.
+
+8.2. Sistem Bileşenleri
+- main.py: Uygulama girişi; StartupDialog sonrası DataEngine ve TradingEngine
+  örneklenir; MainWindow açılır; get_bots ile bot listesi oluşturulur.
+- startup_dialog.py: Veri kaynağı ve tarih aralığı seçimi.
+- data_engine.py: 1m veri, resample, get_completed_tf_candles, sinyaller.
+- trading_engine.py: Pozisyon yaşam döngüsü, komisyon, check_price.
+- ui_components.py: Grafikler, bot seçimi, olay bağlantıları.
+- web_api.py: FastAPI oturumu, WebSocket, web tarafı için motor köprüsü.
+- bots/: Kural tabanlı ve ML stratejileri; ml_classify_5m_features.py özellik
+  mühendisliği; ml_classify_5m_bot.py ve ml_classify_5m_bot_v2.py çıkarım ve risk
+  kuralları; train_ml_classify_5m.py offline eğitim.
+- llm/: Ollama istemcisi, üretim hattı ve kayıtlı botların yüklenmesi.
+
+8.3. Kod Yapısı
+Depo; çekirdek motor ve arayüz dosyalarının kök dizinde, stratejilerin bots/
+altında, eğitim scriptlerinin train_*.py adlarıyla ayrılmasıyla düzenlenmiştir.
+Bu ayrım bakım ve test edilebilirliği kolaylaştırır.
+
+================================================================================
+9. MVP VE ÖZELLİKLER
+================================================================================
+MVP; veri yükleme, oynatma, tek pozisyonlu vadeli simülasyon, çoklu bot, temel
+istatistikler ve grafik gösterimini içerir. Genişletilmiş özellikler arasında
+ML sınıflandırma botu (5m, RSI/MACD/ATR/EMA50 göreli mesafe özellikleri, t+3
+etiketi, kronolojik veya yürüyen pencere eğitimi), gevşek eşikli v2 botu ve
+LLM ile bot üretimi yer alır. v1 botunda daha sıkı olasılık eşikleri kullanılırken
+v2 sürümünde daha düşük kazanma olasılığı ve minimum kenar şartı ile işlem
+sıklığı artırılmaya çalışılmıştır.
+
+================================================================================
+10. TEST VE DEĞERLENDİRME
+================================================================================
+Birim düzeyinde: işlem motorunda marjin, komisyon ve kapanış sonrası bakiye
+tutarlılığı kontrolleri. Entegrasyon düzeyinde: kısa tarih aralığında simülasyon
+koşturarak bot loglarının üretildiğinin ve pozisyon açılıp kapandığının doğrulanması.
+ML tarafında: eğitim verisinin kronolojik bölünmesi ve etiketin horizon kadar
+ileri kaydırılmasıyla sızıntının azaltıldığının kod incelemesi ile teyidi.
+Sayısal performans iddiaları (örneğin belirli bir getiri yüzdesi), kullanılan
+veri seti ve tekrar sayısı belirtilmeden genellenmemelidir; raporda deneysel
+protokol açıkça tanımlanmalıdır.
+
+================================================================================
+11. SONUÇLAR VE TARTIŞMA
+================================================================================
+Sistem, vadeli işlem davranışını uçtan uca simüle edebilen modüler bir yapı
+sunmaktadır. Olay güdümlü veri akışı, strateji kodunu borsa entegrasyonundan
+ayırmada etkilidir. ML bileşeni, offline eğitim ile runtime çıkarımının
+yrılmasına ve göstergelerin yalnızca geçmiş veriye dayanmasına dikkat edecek
+şekilde kurgulanmıştır. Bununla birlikte modelin genelleme yeteneği veri
+dağılımına bağlıdır; canlı piyasada slippage ve likidite etkileri bu simülatörde
+tam modellenmeyebilir. Bu sınırlılıklar raporda açıkça belirtilmelidir.
+
+================================================================================
+12. SONUÇ VE GELECEK ÇALIŞMALAR
+================================================================================
+Sonuç olarak, proje; Bitcoin vadeli işlem benzeri senaryoların yerel ortamda
+geri test edilmesi için işlevsel bir platform üretmiştir. Gelecek çalışmalar
+olarak şunlar önerilebilir: daha gerçekçi slippage ve emir defteri modelleri;
+çoklu pozisyon veya portföy düzeyi risk; otomatik hiperparametre arama;
+açıklanabilirlik (SHAP) analizleri; üretim düzeyinde test ve sürekli entegrasyon
+boru hatları.
+
+================================================================================
+13. EKLER
+================================================================================
+Ek A: Kaynak kod deposu (Git) ve önemli dosya listesi
+Ek B: Kurulum ve çalıştırma (README.md özetine uygun komutlar)
+Ek C: ML eğitim örneği (train_ml_classify_5m.py parametreleri)
+Ek D: Ekran görüntüleri (masaüstü ve web arayüzü)
+
+--- Rapor Sonu ---
