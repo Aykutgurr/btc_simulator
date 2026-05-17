@@ -18,6 +18,7 @@ from .executioner_bot_v2 import ExecutionerBotV2
 from .ict_ml_bot import ICT_ML_Bot
 from .ml_bot_1 import ML_bot_1
 from .msb_mtf_bot import MSB_MTF_Bot
+from .super_bot import SuperBot
 
 
 def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
@@ -36,5 +37,6 @@ def get_bots(trading_engine: Any, data_engine: Any = None) -> List[Any]:
         bots_list.append(ICT_ML_Bot(trading_engine, data_engine))
         bots_list.append(ML_bot_1(trading_engine, data_engine))
         bots_list.append(MSB_MTF_Bot(trading_engine, data_engine))
+        bots_list.append(SuperBot(trading_engine, data_engine))
     bots_list.extend(instantiate_registered_bots(trading_engine, data_engine))
     return bots_list
