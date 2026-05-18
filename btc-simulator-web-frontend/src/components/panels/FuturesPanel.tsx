@@ -171,6 +171,14 @@ export function FuturesPanel() {
               <span className="text-zinc-500">Marjin:</span>
               <span className="ml-2 text-zinc-200 font-mono">{fmt.usdt(position.margin_usdt)}</span>
             </div>
+            {position.position_size_btc != null && (
+              <div>
+                <span className="text-zinc-500">Boyut:</span>
+                <span className="ml-2 text-zinc-200 font-mono">
+                  {position.position_size_btc.toFixed(6)} BTC
+                </span>
+              </div>
+            )}
             <div>
               <span className="text-zinc-500">ROE:</span>
               <span

@@ -739,7 +739,7 @@ app.add_middleware(
 async def get_session():
     # If no data loaded yet, try default csv in repo root
     if not SESSION.data.has_data():
-        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "btc_ohlcv.csv")
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "btc_ohlcv.csv")
         if os.path.isfile(csv_path):
             SESSION.data.load_csv(csv_path)
             SESSION.dataset = {"source": "csv", "csvPath": csv_path, "start": "", "end": ""}
@@ -778,7 +778,7 @@ async def load_session(body: LoadSessionBody):
         return {"ok": True}
 
     if body.source == "csv":
-        path = body.csvPath or os.path.join(os.path.dirname(os.path.abspath(__file__)), "btc_ohlcv.csv")
+        path = body.csvPath or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "btc_ohlcv.csv")
         start = datetime.fromisoformat(body.startDate) if body.startDate else None
         end = datetime.fromisoformat(body.endDate) if body.endDate else None
         ok = SESSION.data.load_csv(path, start=start, end=end)

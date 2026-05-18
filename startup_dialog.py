@@ -247,7 +247,7 @@ class StartupDialog(QDialog):
             QMessageBox.warning(self, "Uyarı", "Başlangıç tarihi bitişten sonra olamaz.")
             return
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(base_dir, "btc_ohlcv.csv")
+        csv_path = os.path.join(base_dir, "data", "btc_ohlcv.csv")
         if os.path.isfile(csv_path):
             try:
                 df = pd.read_csv(csv_path, nrows=5)
@@ -280,7 +280,9 @@ class StartupDialog(QDialog):
         if success and df is not None and not df.empty:
             self._df_fetched = df
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            out_path = os.path.join(base_dir, "btc_ohlcv.csv")
+            data_dir = os.path.join(base_dir, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            out_path = os.path.join(data_dir, "btc_ohlcv.csv")
             try:
                 df.to_csv(out_path, index=True, encoding="utf-8-sig")
                 self._csv_path = out_path

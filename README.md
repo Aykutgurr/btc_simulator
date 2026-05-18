@@ -65,7 +65,7 @@ npm run dev
 
 Frontend varsayılan olarak **mock mode** ile açılabilir. Backend’e bağlamak için env ayarları:
 
-`btc-simulator-web-frontend/.env` (örnek):
+`btc-simulator-web-frontend/.env.local` (örnek):
 
 ```bash
 VITE_MOCK_MODE=false
@@ -93,11 +93,22 @@ pip install pandas-ta
 
 ## Proje Yapısı (kısa)
 
-- `main.py`: PyQt masaüstü uygulaması giriş noktası
-- `ui_components.py`: PyQt UI
-- `data_engine.py`: 1m akış + resample
-- `trading_engine.py`: futures simülasyon motoru
-- `bots/`: strateji botları
-- `web_api.py`: web frontend için FastAPI backend + WS
-- `btc-simulator-web-frontend/`: React/Vite web arayüzü
+```
+btc_simulator/
+├── main.py, web_api.py          # Giriş noktaları (masaüstü + web API)
+├── data_engine.py, trading_engine.py, ui_components.py, drawing_tools.py
+├── startup_dialog.py, sandbox_runner.py
+├── data/                        # btc_ohlcv.csv (varsayılan veri)
+├── bots/                        # Strateji botları + generated/
+├── bot_sdk/                     # Bot yardımcıları
+├── llm/                         # Ollama bot üretimi
+├── models/                      # Eğitilmiş ML modelleri
+├── scripts/                     # train_*.py eğitim scriptleri
+├── logs/                        # Bot/işlem CSV exportları (gitignore)
+├── docs/                        # WEB_API.md, tez metni, şablonlar
+├── tools/presentation/          # Sunum üretici (opsiyonel)
+└── btc-simulator-web-frontend/    # React/Vite web arayüzü
+```
+
+Web API dokümantasyonu: [docs/WEB_API.md](docs/WEB_API.md)
 

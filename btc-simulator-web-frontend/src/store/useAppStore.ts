@@ -20,6 +20,7 @@ import type {
   ConnectionStatus,
   WsEvent,
   LlmBotMeta,
+  SandboxReport,
 } from '../types';
 import { api } from '../api/client';
 import { wsClient } from '../api/wsClient';
@@ -63,7 +64,7 @@ interface AppState {
 
   // LLM Bots
   llmBots: LlmBotMeta[];
-  lastBotTestReport: { botId: string; report: unknown } | null;
+  lastBotTestReport: { botId: string; report: SandboxReport } | null;
 
   // Loading flags
   isLoadingMarket: boolean;
@@ -75,7 +76,7 @@ interface AppState {
 interface AppActions {
   // Init
   initialize(): Promise<void>;
-  loadSession(params: { source: 'csv' | 'yfinance'; startDate?: string; endDate?: string; csvPath?: string }): Promise<{ ok: boolean }>;
+  loadSession(params: { source: 'csv' | 'yfinance' | 'ccxt' | 'mock'; startDate?: string; endDate?: string; csvPath?: string }): Promise<{ ok: boolean }>;
 
   // UI
   setActiveTab(tab: TabId): void;
@@ -85,7 +86,7 @@ interface AppActions {
   play(): Promise<void>;
   pause(): Promise<void>;
   step(): Promise<void>;
-  fastForward(): Promise<void>;
+  fastForward(batchSize?: number): Promise<void>;
   setTimeframe(tf: Timeframe): Promise<void>;
   setSpeed(preset?: SpeedPreset, speedMs?: number): Promise<void>;
 
@@ -112,8 +113,17 @@ interface AppActions {
 
   // LLM Bots
   refreshLlmBots(): Promise<void>;
-  generateLlmBot(payload: { name: string; timeframe: Timeframe; description: string }): Promise<{ ok: boolean; botId?: string; error?: string }>;
-  testLlmBot(payload: { botId: string; maxSteps?: number; timeoutSec?: number }): Promise<{ ok: boolean; report?: unknown; error?: string }>;
+  generateLlmBot(payload: {
+    name: string;
+    timeframe: Timeframe;
+    description: string;
+    constraints?: Record<string, string>;
+  }): Promise<{ ok: boolean; botId?: string; error?: string; raw?: string }>;
+  testLlmBot(payload: { botId: string; maxSteps?: number; timeoutSec?: number }): Promise<{
+    ok: boolean;
+    report?: SandboxReport;
+    error?: string;
+  }>;
 
   // WebSocket handler
   handleWsEvent(event: WsEvent): void;
@@ -257,9 +267,10 @@ export const useAppStore = create<AppState & AppActions>()(
       await api.step();
       await get().refreshMarket();
     },
-    async fastForward() {
-      await api.fastForward();
+    async fastForward(batchSize?: number) {
+      await api.fastForward(batchSize);
       await get().refreshMarket();
+      await get().refreshTrade();
     },
     async setTimeframe(tf) {
       await api.setTimeframe(tf);
@@ -381,13 +392,13 @@ export const useAppStore = create<AppState & AppActions>()(
       if (res.ok) {
         await Promise.all([get().refreshBots(), get().refreshLlmBots()]);
       }
-      return { ok: !!res.ok, botId: res.botId, error: res.error };
+      return { ok: !!res.ok, botId: res.botId, error: res.error, raw: res.raw };
     },
 
     async testLlmBot(payload) {
       const res = await api.testLlmBot(payload);
       if (res.ok && res.report) {
-        set({ lastBotTestReport: { botId: payload.botId, report: res.report } });
+        set({ lastBotTestReport: { botId: payload.botId, report: res.report as SandboxReport } });
         await get().refreshTrade();
         await get().refreshMarket();
         await get().refreshLlmBots();
@@ -439,7 +450,7 @@ export const useAppStore = create<AppState & AppActions>()(
           get().refreshLlmBots();
           break;
         case 'botTestReport':
-          set({ lastBotTestReport: { botId: event.botId, report: event.report } });
+          set({ lastBotTestReport: { botId: event.botId, report: event.report as SandboxReport } });
           get().refreshLlmBots();
           break;
         case 'tfClose':

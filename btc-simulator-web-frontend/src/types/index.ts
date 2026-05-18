@@ -19,6 +19,7 @@ export interface Position {
   take_profit?: number | null;
   opened_by: string;
   entry_time: string;
+  position_size_btc?: number;
 }
 
 export interface TradeRecord {
@@ -138,6 +139,15 @@ export interface LogsResponse {
 
 // ─── LLM Bot Builder Types ────────────────────────────────────────────────────
 
+export interface SandboxReport {
+  ok: boolean;
+  steps?: number;
+  stats?: Stats;
+  tradeHistorySample?: TradeRecord[];
+  logsTail?: string[];
+  error?: string;
+}
+
 export interface LlmBotMeta {
   id: string;
   name: string;
@@ -145,7 +155,7 @@ export interface LlmBotMeta {
   path?: string;
   enabled?: boolean;
   createdAt?: string;
-  lastTest?: unknown;
+  lastTest?: SandboxReport | null;
 }
 
 export interface LlmBotsResponse {
@@ -207,7 +217,7 @@ export interface WsBotGeneratedEvent {
 export interface WsBotTestReportEvent {
   type: 'botTestReport';
   botId: string;
-  report: unknown;
+  report: SandboxReport;
 }
 
 export type WsEvent =

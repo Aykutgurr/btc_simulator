@@ -9,16 +9,18 @@ import { BotsManager } from '../components/panels/BotsManager';
 import { BotLogViewer } from '../components/panels/BotLogViewer';
 import { EquityChart } from '../components/chart/EquityChart';
 import { BotTestReport } from '../components/panels/BotTestReport';
+import { LlmBotsPanel } from '../components/panels/LlmBotsPanel';
 import { Button } from '../components/ui/Button';
 import { useAppStore } from '../store/useAppStore';
 
 export function BotsStatsPage() {
-  const { refreshBots, refreshLogs, refreshTrade, equityCurve } = useAppStore();
+  const { refreshBots, refreshLogs, refreshTrade, refreshLlmBots, equityCurve } = useAppStore();
 
   useEffect(() => {
     refreshBots();
     refreshLogs();
     refreshTrade();
+    refreshLlmBots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -33,7 +35,7 @@ export function BotsStatsPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => { refreshBots(); refreshLogs(); refreshTrade(); }}
+          onClick={() => { refreshBots(); refreshLogs(); refreshTrade(); refreshLlmBots(); }}
           leftIcon={<RefreshCw size={13} />}
         >
           Yenile
@@ -55,6 +57,8 @@ export function BotsStatsPage() {
         <BotsManager />
         <BotLogViewer />
       </div>
+
+      <LlmBotsPanel />
 
       <BotTestReport />
 

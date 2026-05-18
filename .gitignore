@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE / agent
+.claude/
+.continue/
+.cursor/
+.idea/
+.vscode/
+*.swp
+*~
+
+# Debug / logs
+debug-*.log
+*.log
+logs/*.csv
+!logs/.gitkeep
+
+# Node (frontend)
+btc-simulator-web-frontend/node_modules/
+btc-simulator-web-frontend/dist/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Presentation output
+*.pptx

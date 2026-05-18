@@ -190,14 +190,24 @@ function generateLogs(count = 50): string[] {
 // ─── Public Mock State ────────────────────────────────────────────────────────
 
 // Build once so data is consistent across mock calls
-const CANDLES = generateCandles(200);
+const ALL_CANDLES = generateCandles(500);
+let mockCandleIndex = 200;
+
+function visibleCandles(): Candle[] {
+  const start = Math.max(0, mockCandleIndex - 199);
+  return ALL_CANDLES.slice(start, mockCandleIndex + 1);
+}
 const TRADES = generateTradeHistory(30);
 const STATS = generateStats(TRADES);
 const EQUITY = generateEquity(TRADES);
-const RSI = generateRSI(CANDLES.length);
-const MACD = generateMACD(CANDLES.length);
-const EMA20 = generateEMA(CANDLES, 20);
-const EMA50 = generateEMA(CANDLES, 50);
+function indicatorsFor(candles: Candle[]) {
+  return {
+    rsi: generateRSI(candles.length),
+    macd: generateMACD(candles.length),
+    ema20: generateEMA(candles, 20),
+    ema50: generateEMA(candles, 50),
+  };
+}
 
 let mockBalance = TRADES.length > 0 ? TRADES[TRADES.length - 1].bakiye : 10_000;
 let mockPosition: Position | null = null;
@@ -213,8 +223,8 @@ export const mockHandlers = {
       sessionId: 'mock-session-001',
       dataset: {
         source: 'mock',
-        start: CANDLES[0].time,
-        end: CANDLES[CANDLES.length - 1].time,
+        start: ALL_CANDLES[0].time,
+        end: ALL_CANDLES[ALL_CANDLES.length - 1].time,
       },
       playback: { timeframe: '1m', speedMs: 100, preset: '10x' },
       connection: { ws: false },
@@ -222,13 +232,18 @@ export const mockHandlers = {
   },
 
   getMarketState(): MarketStateResponse {
+    const candles = visibleCandles();
     return {
-      index: CANDLES.length - 1,
-      currentCandle: CANDLES[CANDLES.length - 1],
-      displayCandles: CANDLES,
-      indicators: { rsi: RSI, macd: MACD, ema20: EMA20, ema50: EMA50 },
+      index: mockCandleIndex,
+      currentCandle: candles[candles.length - 1] ?? null,
+      displayCandles: candles,
+      indicators: indicatorsFor(candles),
       equity: EQUITY,
     };
+  },
+
+  advanceStep(count = 1) {
+    mockCandleIndex = Math.min(ALL_CANDLES.length - 1, mockCandleIndex + count);
   },
 
   getTradeState(): TradeStateResponse {
@@ -251,13 +266,15 @@ export const mockHandlers = {
     if (mockPosition) {
       return { success: false, message: 'Zaten açık bir pozisyon var.' };
     }
-    const currentPrice = CANDLES[CANDLES.length - 1].close;
+    const currentPrice = ALL_CANDLES[mockCandleIndex].close;
     const liqDist = (1 / req.leverage) * currentPrice;
+    const sizeBtc = (req.marginUsdt * req.leverage) / currentPrice;
     mockPosition = {
       direction: req.direction,
       entry_price: currentPrice,
       leverage: req.leverage,
       margin_usdt: req.marginUsdt,
+      position_size_btc: parseFloat(sizeBtc.toFixed(8)),
       liquidation_price:
         req.direction === 'long'
           ? parseFloat((currentPrice - liqDist).toFixed(2))
@@ -273,7 +290,7 @@ export const mockHandlers = {
 
   closeTrade(): { closed: boolean; record?: TradeRecord } {
     if (!mockPosition) return { closed: false };
-    const exitPrice = CANDLES[CANDLES.length - 1].close;
+    const exitPrice = ALL_CANDLES[mockCandleIndex].close;
     const pnl_raw =
       mockPosition.direction === 'long'
         ? exitPrice - mockPosition.entry_price

@@ -3,7 +3,7 @@
  * speed presets, ms slider, indicator toggles.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Play,
   Pause,
@@ -22,6 +22,7 @@ import { clsn } from '../../utils/format';
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1h', '4h'];
 const SPEED_PRESETS: SpeedPreset[] = ['1x', '10x', '100x', 'Max Hız'];
+const FF_BATCH_OPTIONS = [100, 500, 1000] as const;
 
 const INDICATOR_CONFIG: { key: keyof IndicatorToggles; label: string; icon: React.ReactNode }[] = [
   { key: 'volume', label: 'Vol', icon: <BarChart2 size={12} /> },
@@ -47,6 +48,8 @@ export function ControlsPanel() {
     setSpeed,
     toggleIndicator,
   } = useAppStore();
+
+  const [ffBatch, setFfBatch] = useState<number>(100);
 
   const handlePlayPause = useCallback(() => {
     if (isPlaying) pause();
@@ -96,9 +99,32 @@ export function ControlsPanel() {
         <Button variant="ghost" size="sm" onClick={step} leftIcon={<SkipForward size={13} />}>
           Adım
         </Button>
-        <Button variant="ghost" size="sm" onClick={fastForward} leftIcon={<FastForward size={13} />}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => fastForward(ffBatch)}
+          leftIcon={<FastForward size={13} />}
+        >
           Hızlı
         </Button>
+        <div className="flex items-center gap-0.5">
+          {FF_BATCH_OPTIONS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setFfBatch(n)}
+              className={clsn(
+                'px-1.5 py-0.5 text-[10px] font-mono rounded border',
+                ffBatch === n
+                  ? 'bg-sky-600/30 text-sky-300 border-sky-600/50'
+                  : 'bg-zinc-800 text-zinc-500 border-zinc-700'
+              )}
+              title={`Fast-forward ${n} mum`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="w-px h-6 bg-zinc-700" />

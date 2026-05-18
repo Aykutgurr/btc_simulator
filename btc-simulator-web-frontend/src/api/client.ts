@@ -91,12 +91,18 @@ export const api = {
   },
 
   step(): Promise<void> {
-    if (IS_MOCK) return Promise.resolve();
+    if (IS_MOCK) {
+      mockHandlers.advanceStep(1);
+      return Promise.resolve();
+    }
     return post('/playback/step');
   },
 
   fastForward(batchSize?: number): Promise<void> {
-    if (IS_MOCK) return Promise.resolve();
+    if (IS_MOCK) {
+      mockHandlers.advanceStep(batchSize ?? 100);
+      return Promise.resolve();
+    }
     return post('/playback/fast-forward', { batchSize });
   },
 
@@ -190,7 +196,15 @@ export const api = {
     name: string;
     timeframe: string;
     description: string;
-  }): Promise<{ ok: boolean; botId?: string; path?: string; compileOk?: boolean; error?: string }> {
+    constraints?: Record<string, string>;
+  }): Promise<{
+    ok: boolean;
+    botId?: string;
+    path?: string;
+    compileOk?: boolean;
+    error?: string;
+    raw?: string;
+  }> {
     if (IS_MOCK) return Promise.resolve({ ok: false, error: 'Mock mode: LLM disabled' });
     return post('/llm/bots/generate', payload);
   },

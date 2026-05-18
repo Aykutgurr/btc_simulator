@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { X, Sparkles, FlaskConical } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -24,20 +24,50 @@ export function LlmBotBuilderModal({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [generatedBotId, setGeneratedBotId] = useState<string | null>(null);
+  const [constraintsText, setConstraintsText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [errorRaw, setErrorRaw] = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
 
   const canSubmit = useMemo(() => name.trim().length >= 3 && description.trim().length >= 10, [name, description]);
+
+  const parseConstraints = useCallback((): Record<string, string> | undefined => {
+    const lines = constraintsText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return undefined;
+    const out: Record<string, string> = {};
+    for (const line of lines) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+      } else if (line.includes(':')) {
+        const [k, ...rest] = line.split(':');
+        out[k.trim()] = rest.join(':').trim();
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }, [constraintsText]);
 
   if (!open) return null;
 
   async function handleGenerate() {
     setIsGenerating(true);
     setError(null);
+    setErrorRaw(null);
+    setShowRaw(false);
     setGeneratedBotId(null);
     try {
-      const res = await generateLlmBot({ name: name.trim(), timeframe, description: description.trim() });
+      const res = await generateLlmBot({
+        name: name.trim(),
+        timeframe,
+        description: description.trim(),
+        constraints: parseConstraints(),
+      });
       if (!res.ok || !res.botId) {
         setError(res.error ?? 'Üretim başarısız.');
+        setErrorRaw(res.raw ?? null);
         return;
       }
       setGeneratedBotId(res.botId);
@@ -109,7 +139,23 @@ export function LlmBotBuilderModal({
 
                 <div className="flex items-center gap-2">
                   <Badge variant="purple">Model</Badge>
-                  <span className="text-xs text-zinc-500 font-mono">llama3.2:3b (Ollama)</span>
+                  <span className="text-xs text-zinc-500">Ollama — model backend .env (LLM_MODEL)</span>
+                </div>
+
+                <div>
+                  <div className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
+                    Kısıtlar (opsiyonel)
+                  </div>
+                  <textarea
+                    className={clsn(
+                      'w-full h-20 bg-zinc-800 border border-zinc-700 rounded-md text-xs text-zinc-100 placeholder-zinc-600',
+                      'focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-600 p-2 font-mono'
+                    )}
+                    placeholder={'max_leverage=10\nonly_long=true'}
+                    value={constraintsText}
+                    onChange={(e) => setConstraintsText(e.target.value)}
+                  />
+                  <div className="text-xs text-zinc-600 mt-1">Satır başına key=value veya key: value</div>
                 </div>
               </div>
 
@@ -132,8 +178,26 @@ export function LlmBotBuilderModal({
             </div>
 
             {error && (
-              <div className="mt-4 text-xs px-3 py-2 rounded-lg border bg-rose-900/30 border-rose-700/50 text-rose-300">
-                {error}
+              <div className="mt-4 space-y-2">
+                <div className="text-xs px-3 py-2 rounded-lg border bg-rose-900/30 border-rose-700/50 text-rose-300">
+                  {error}
+                </div>
+                {errorRaw && (
+                  <div>
+                    <button
+                      type="button"
+                      className="text-xs text-zinc-500 hover:text-zinc-300 underline"
+                      onClick={() => setShowRaw((v) => !v)}
+                    >
+                      {showRaw ? 'Ham çıktıyı gizle' : 'Ham LLM çıktısını göster'}
+                    </button>
+                    {showRaw && (
+                      <pre className="mt-2 text-xs bg-zinc-950 border border-zinc-800 rounded-lg p-3 max-h-40 overflow-auto text-zinc-400 whitespace-pre-wrap">
+                        {errorRaw}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
